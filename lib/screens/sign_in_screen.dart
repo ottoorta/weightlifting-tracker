@@ -1,16 +1,14 @@
+// lib/screens/sign_in_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'home_screen.dart';
-import 'first_user_inputs.dart';
-import 'sign_up_screen.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-final GoogleSignIn _googleSignIn = GoogleSignIn(
-  scopes: ['email'],
-);
+import 'sign_up_screen.dart';
+import 'forgot_password_screen.dart';
+
+final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -23,35 +21,40 @@ class _SignInScreenState extends State<SignInScreen> {
   final _pass = TextEditingController();
   bool _remember = false;
   String _error = '';
+  bool _loading = false;
 
+  // Save "Remember me"
+  Future<void> _saveRemember() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('remember_me', _remember);
+  }
+
+  // LOGIN → GO HOME (no first inputs check!)
   Future<void> _login() async {
+    setState(() => _loading = true);
     try {
       setState(() => _error = '');
-      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _email.text.trim(),
         password: _pass.text.trim(),
       );
       await _saveRemember();
-      await _checkFirstInputs(cred.user!.uid);
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
+      }
     } catch (e) {
       setState(() => _error = 'Check wrong email or password');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
+  // GOOGLE
   Future<void> _google() async {
     try {
-      // This clears previous session
       await _googleSignIn.signOut();
-
       final googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Google login cancelled')),
-          );
-        }
-        return;
-      }
+      if (googleUser == null) return;
 
       final googleAuth = await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
@@ -59,56 +62,36 @@ class _SignInScreenState extends State<SignInScreen> {
         idToken: googleAuth.idToken,
       );
 
-      final userCred =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      await _checkFirstInputs(userCred.user!.uid);
-    } catch (e) {
+      await FirebaseAuth.instance.signInWithCredential(credential);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Google login failed: $e')),
-        );
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
       }
+    } catch (e) {
+      _showSnack('Google login failed');
     }
   }
 
-  Future<void> _facebook() async => await _socialLogin(() async {
-        final result = await FacebookAuth.instance.login();
-        if (result.accessToken == null) {
-          throw Exception('Facebook login cancelled');
-        }
-        return FacebookAuthProvider.credential(result.accessToken!.tokenString);
-      });
-
-  Future<void> _socialLogin(Future<AuthCredential> Function() getCred) async {
+  // FACEBOOK
+  Future<void> _facebook() async {
     try {
-      final cred = await getCred();
-      final userCred = await FirebaseAuth.instance.signInWithCredential(cred);
-      await _checkFirstInputs(userCred.user!.uid);
-    } catch (e) {
+      final result = await FacebookAuth.instance.login();
+      if (result.accessToken == null) return;
+
+      final credential =
+          FacebookAuthProvider.credential(result.accessToken!.tokenString);
+      await FirebaseAuth.instance.signInWithCredential(credential);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Social login failed: $e')),
-        );
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
       }
+    } catch (e) {
+      _showSnack('Facebook login failed');
     }
   }
 
-  Future<void> _saveRemember() async {
-    final p = await SharedPreferences.getInstance();
-    p.setBool('remember_me', _remember);
-  }
-
-  Future<void> _checkFirstInputs(String uid) async {
-    final doc =
-        await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => doc.exists && doc['gender'] != null
-            ? const HomeScreen()
-            : const FirstUserInputs(),
-      ),
-    );
+  void _showSnack(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   @override
@@ -134,77 +117,127 @@ class _SignInScreenState extends State<SignInScreen> {
                   const Text('Sign in to your account via email',
                       style: TextStyle(color: Colors.white70)),
                   const SizedBox(height: 32),
+
+                  // Email
                   TextField(
-                      controller: _email,
-                      decoration: const InputDecoration(
-                          hintText: 'Enter your email',
-                          filled: true,
-                          fillColor: Colors.white)),
+                    controller: _email,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.email_outlined),
+                      hintText: 'Enter your email',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(30)),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 12),
+
+                  // Password
                   TextField(
-                      controller: _pass,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                          hintText: 'Enter your password',
-                          filled: true,
-                          fillColor: Colors.white)),
+                    controller: _pass,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.lock_outline),
+                      hintText: 'Enter your password',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(30)),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+
+                  // Error
                   if (_error.isNotEmpty)
                     Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(_error,
-                            style: const TextStyle(color: Colors.orange))),
-                  Row(children: [
-                    Checkbox(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(_error,
+                          style: const TextStyle(color: Colors.orange)),
+                    ),
+
+                  // Remember + Forgot
+                  Row(
+                    children: [
+                      Checkbox(
                         value: _remember,
-                        onChanged: (v) => setState(() => _remember = v!)),
-                    const Text('Remember me',
-                        style: TextStyle(color: Colors.orange)),
-                    const Spacer(),
-                    GestureDetector(
-                        onTap: () {},
+                        activeColor: Colors.orange,
+                        onChanged: (v) => setState(() => _remember = v!),
+                      ),
+                      const Text('Remember me',
+                          style: TextStyle(color: Colors.orange)),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () => Navigator.pushNamed(context, '/forgot'),
                         child: const Text('Forgot password?',
-                            style: TextStyle(color: Colors.orange))),
-                  ]),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _login,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: const StadiumBorder()),
-                    child: const Text('Sign in →',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                            style: TextStyle(color: Colors.orange)),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 16),
+
+                  // SIGN IN BUTTON
+                  ElevatedButton(
+                    onPressed: _loading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: const StadiumBorder(),
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Text('Sign in',
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold)),
+                  ),
+
                   const SizedBox(height: 32),
                   const Center(
-                      child: Text('Sign in with social media',
-                          style: TextStyle(color: Colors.white))),
+                    child: Text('Sign in with social media',
+                        style: TextStyle(color: Colors.white)),
+                  ),
                   const SizedBox(height: 16),
+
+                  // Google
                   ElevatedButton.icon(
-                      onPressed: _google,
-                      icon: const Icon(Icons.g_mobiledata, color: Colors.red),
-                      label: const Text('Sign in with Google'),
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black)),
+                    onPressed: _google,
+                    icon: const Icon(Icons.g_mobiledata, color: Colors.red),
+                    label: const Text('Sign in with Google'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
                   const SizedBox(height: 12),
+
+                  // Facebook
                   ElevatedButton.icon(
-                      onPressed: _facebook,
-                      icon: const Icon(Icons.facebook, color: Colors.blue),
-                      label: const Text('Sign in with Facebook'),
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black)),
+                    onPressed: _facebook,
+                    icon: const Icon(Icons.facebook, color: Colors.blue),
+                    label: const Text('Sign in with Facebook'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+
                   const SizedBox(height: 32),
                   Center(
-                      child: GestureDetector(
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const SignUpScreen())),
-                          child: const Text('Not a member Create a new account',
-                              style: TextStyle(color: Colors.orange)))),
+                    child: GestureDetector(
+                      onTap: () => Navigator.pushNamed(context, '/signup'),
+                      child: const Text('Not a member? Create a new account',
+                          style: TextStyle(color: Colors.orange)),
+                    ),
+                  ),
                 ],
               ),
             ),
