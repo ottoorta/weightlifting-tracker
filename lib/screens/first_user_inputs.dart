@@ -18,14 +18,23 @@ class _FirstUserInputsState extends State<FirstUserInputs> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    final user = FirebaseAuth.instance.currentUser!;
+    final uid = user.uid;
+
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'uid': uid,
+      'email': user.email,
+      'name': user.displayName ?? 'Iron Warrior',
+      'photoURL': user.photoURL,
       'gender': _gender,
       'height': _height,
       'weight': _weight,
       'goal': _goal,
+      'level': 'beginner',
       'createdAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+
     Navigator.pushReplacement(
         context, MaterialPageRoute(builder: (_) => const HomeScreen()));
   }
@@ -35,7 +44,8 @@ class _FirstUserInputsState extends State<FirstUserInputs> {
     return Scaffold(
       body: Stack(
         children: [
-          Image.asset('assets/images/splash_bg.jpg', fit: BoxFit.cover),
+          Image.asset('assets/images/splash_bg.jpg',
+              fit: BoxFit.cover, height: double.infinity),
           Container(color: const Color(0x80000000)),
           SafeArea(
             child: SingleChildScrollView(
@@ -45,11 +55,13 @@ class _FirstUserInputsState extends State<FirstUserInputs> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Complete Your Profile',
+                    const Text('Welcome!',
                         style: TextStyle(
-                            fontSize: 28,
+                            fontSize: 32,
                             color: Colors.white,
                             fontWeight: FontWeight.bold)),
+                    const Text('3 quick questions',
+                        style: TextStyle(fontSize: 18, color: Colors.white70)),
                     const SizedBox(height: 32),
                     DropdownButtonFormField<String>(
                       value: _gender,
@@ -59,13 +71,13 @@ class _FirstUserInputsState extends State<FirstUserInputs> {
                           fillColor: Colors.white),
                       items: ['Male', 'Female', 'Other']
                           .map(
-                              (g) => DropdownMenuItem(value: g, child: Text(g)))
+                              (e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
                       onChanged: (v) => setState(() => _gender = v!),
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
-                      initialValue: _height.toString(),
+                      initialValue: '170',
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                           labelText: 'Height (cm)',
@@ -75,7 +87,7 @@ class _FirstUserInputsState extends State<FirstUserInputs> {
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
-                      initialValue: _weight.toString(),
+                      initialValue: '70',
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                           labelText: 'Weight (kg)',
@@ -97,19 +109,22 @@ class _FirstUserInputsState extends State<FirstUserInputs> {
                         'Stay Fit'
                       ]
                           .map(
-                              (g) => DropdownMenuItem(value: g, child: Text(g)))
+                              (e) => DropdownMenuItem(value: e, child: Text(e)))
                           .toList(),
                       onChanged: (v) => setState(() => _goal = v!),
                     ),
                     const SizedBox(height: 40),
-                    ElevatedButton(
-                      onPressed: _save,
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          padding: const EdgeInsets.all(16)),
-                      child: const Center(
-                          child: Text('Start Training →',
-                              style: TextStyle(fontSize: 18))),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _save,
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            padding: const EdgeInsets.all(18)),
+                        child: const Text('CREATE MY PLAN →',
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold)),
+                      ),
                     ),
                   ],
                 ),

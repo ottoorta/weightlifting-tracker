@@ -33,14 +33,40 @@ class _SignInScreenState extends State<SignInScreen> {
     }
   }
 
-  Future<void> _google() async => await _socialLogin(() async {
-        final g = await GoogleSignIn().signIn();
-        final auth = await g!.authentication;
-        return GoogleAuthProvider.credential(
-          accessToken: auth.accessToken,
-          idToken: auth.idToken,
+  Future<void> _google() async {
+    try {
+      // Clear previous session
+      await GoogleSignIn().signOut();
+
+      final googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Login cancelled')),
+          );
+        }
+        return;
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final userCred =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+
+      // THIS LINE WAS MISSING — NOW IT NAVIGATES
+      await _checkFirstInputs(userCred.user!.uid);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Login failed: $e')),
         );
-      });
+      }
+    }
+  }
 
   Future<void> _facebook() async => await _socialLogin(() async {
         final r = await FacebookAuth.instance.login();
