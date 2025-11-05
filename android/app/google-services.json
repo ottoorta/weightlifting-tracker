@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1046843673501",
+    "project_id": "weightlifting-tracker-a9834",
+    "storage_bucket": "weightlifting-tracker-a9834.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1046843673501:android:6316be8b43ccdc57823d74",
+        "android_client_info": {
+          "package_name": "com.example.iron_coach"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAxaPklQ26QzAGOBTeetUVuq3_k4ic98OY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1046843673501:android:73473175ea64c30e823d74",
+        "android_client_info": {
+          "package_name": "com.example.weightlifting_tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAxaPklQ26QzAGOBTeetUVuq3_k4ic98OY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
