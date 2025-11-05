@@ -21,6 +21,7 @@ dependencies:
   flutter_facebook_auth: ^7.1.2   # works perfectly with Firebase 5.x
 
   shared_preferences: ^2.3.2
+  intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
