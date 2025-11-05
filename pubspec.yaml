@@ -5,21 +5,27 @@ version: 1.0.0+1
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
+  flutter: ">=3.22.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  firebase_core: ^2.24.2
-  firebase_auth: ^4.15.3
-  cloud_firestore: ^4.14.0
-  google_sign_in: 5.4.4
-  flutter_facebook_auth: ^6.0.4
-  shared_preferences: ^2.2.2
+
+  # UPGRADE THE ENTIRE FIREBASE SUITE TOGETHER
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+
+  # SOCIAL LOGINS THAT PLAY NICE
+  google_sign_in: ^6.2.1
+  flutter_facebook_auth: ^7.1.2   # works perfectly with Firebase 5.x
+
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true

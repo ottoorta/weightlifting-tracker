@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
 import 'first_user_inputs.dart';
+import 'sign_up_screen.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+final GoogleSignIn _googleSignIn = GoogleSignIn(
+  scopes: ['email'],
+);
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -35,14 +40,14 @@ class _SignInScreenState extends State<SignInScreen> {
 
   Future<void> _google() async {
     try {
-      // Clear previous session
-      await GoogleSignIn().signOut();
+      // This clears previous session
+      await _googleSignIn.signOut();
 
-      final googleUser = await GoogleSignIn().signIn();
+      final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Login cancelled')),
+            const SnackBar(content: Text('Google login cancelled')),
           );
         }
         return;
@@ -56,27 +61,36 @@ class _SignInScreenState extends State<SignInScreen> {
 
       final userCred =
           await FirebaseAuth.instance.signInWithCredential(credential);
-
-      // THIS LINE WAS MISSING — NOW IT NAVIGATES
       await _checkFirstInputs(userCred.user!.uid);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: $e')),
+          SnackBar(content: Text('Google login failed: $e')),
         );
       }
     }
   }
 
   Future<void> _facebook() async => await _socialLogin(() async {
-        final r = await FacebookAuth.instance.login();
-        return FacebookAuthProvider.credential(r.accessToken!.token);
+        final result = await FacebookAuth.instance.login();
+        if (result.accessToken == null) {
+          throw Exception('Facebook login cancelled');
+        }
+        return FacebookAuthProvider.credential(result.accessToken!.tokenString);
       });
 
   Future<void> _socialLogin(Future<AuthCredential> Function() getCred) async {
-    final cred = await getCred();
-    final user = await FirebaseAuth.instance.signInWithCredential(cred);
-    await _checkFirstInputs(user.user!.uid);
+    try {
+      final cred = await getCred();
+      final userCred = await FirebaseAuth.instance.signInWithCredential(cred);
+      await _checkFirstInputs(userCred.user!.uid);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Social login failed: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _saveRemember() async {
@@ -185,7 +199,10 @@ class _SignInScreenState extends State<SignInScreen> {
                   const SizedBox(height: 32),
                   Center(
                       child: GestureDetector(
-                          onTap: () {},
+                          onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const SignUpScreen())),
                           child: const Text('Not a member Create a new account',
                               style: TextStyle(color: Colors.orange)))),
                 ],
