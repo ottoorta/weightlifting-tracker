@@ -77,7 +77,7 @@ class _SignInScreenState extends State<SignInScreen> {
       body: Stack(
         children: [
           Image.asset('assets/images/splash_bg.jpg',
-              fit: BoxFit.cover, width: double.infinity),
+              fit: BoxFit.cover, height: double.infinity),
           Container(color: const Color(0x80000000)),
           SafeArea(
             child: SingleChildScrollView(
