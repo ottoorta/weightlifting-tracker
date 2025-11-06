@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'sign_up_screen.dart';
 import 'forgot_password_screen.dart';
 
@@ -39,13 +39,38 @@ class _SignInScreenState extends State<SignInScreen> {
         password: _pass.text.trim(),
       );
       await _saveRemember();
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final bool hasInputs = doc.exists && doc.data()?['gender'] != null;
+
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
+        Navigator.pushReplacementNamed(
+          context,
+          hasInputs ? '/home' : '/first_inputs',
+        );
       }
     } catch (e) {
       setState(() => _error = 'Check wrong email or password');
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _createUserDocIfMissing() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final doc =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+
+    if (!doc.exists) {
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'uid': uid,
+        'email': FirebaseAuth.instance.currentUser!.email,
+        'name': FirebaseAuth.instance.currentUser!.displayName ?? 'Warrior',
+        'photoUrl': FirebaseAuth.instance.currentUser!.photoURL,
+        'createdAt': FieldValue.serverTimestamp(),
+        'verified': true,
+      });
     }
   }
 
@@ -63,8 +88,18 @@ class _SignInScreenState extends State<SignInScreen> {
       );
 
       await FirebaseAuth.instance.signInWithCredential(credential);
+      await _createUserDocIfMissing(); // ADD THIS LINE
+
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final bool hasInputs = doc.exists && doc.data()?['gender'] != null;
+
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
+        Navigator.pushReplacementNamed(
+          context,
+          hasInputs ? '/home' : '/first_inputs',
+        );
       }
     } catch (e) {
       _showSnack('Google login failed');
@@ -80,8 +115,17 @@ class _SignInScreenState extends State<SignInScreen> {
       final credential =
           FacebookAuthProvider.credential(result.accessToken!.tokenString);
       await FirebaseAuth.instance.signInWithCredential(credential);
+      await _createUserDocIfMissing(); // ADD THIS LINE
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final bool hasInputs = doc.exists && doc.data()?['gender'] != null;
+
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
+        Navigator.pushReplacementNamed(
+          context,
+          hasInputs ? '/home' : '/first_inputs',
+        );
       }
     } catch (e) {
       _showSnack('Facebook login failed');

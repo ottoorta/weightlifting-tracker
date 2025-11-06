@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../widgets/workout_card.dart'; // CORRECT PATH
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -130,25 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // HERO CARD (Coming next)
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              height: 180,
-              decoration: BoxDecoration(
-                color: Colors.grey[900],
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Center(
-                child: Text(
-                  'Your Next Workout\nCOMING SOON',
-                  style: TextStyle(
-                      color: Colors.orange,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
+            Expanded(child: WorkoutCard()),
 
             const Spacer(),
 

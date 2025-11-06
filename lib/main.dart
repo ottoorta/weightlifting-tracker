@@ -2,21 +2,21 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'screens/first_user_inputs_screen.dart';
-import 'screens/your_gym_screen.dart'; // If adding the stub
+
 import 'screens/splash_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/confirmation_code_screen.dart';
 import 'screens/forgot_password_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/first_user_inputs_screen.dart';
+import 'screens/your_gym_screen.dart';
 import 'screens/forging_exp_screen.dart';
 import 'screens/set_new_password_screen.dart';
-
-import 'screens/search_menu_screen.dart'; // create empty file
-import 'screens/stats_screen.dart'; // create empty file
-import 'screens/messages_screen.dart'; // create empty file
-import 'screens/profile_screen.dart'; // create empty file
+import 'screens/search_menu_screen.dart';
+import 'screens/stats_screen.dart';
+import 'screens/messages_screen.dart';
+import 'screens/profile_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,14 +37,12 @@ class IronCoachApp extends StatelessWidget {
         fontFamily: 'Montserrat',
         scaffoldBackgroundColor: Colors.transparent,
       ),
-
-      // ALL ROUTES — NAMED & READY
+      home: const AuthWrapper(), // THIS IS YOUR START
       routes: {
-        '/': (context) => const SplashScreen(),
         '/signin': (context) => const SignInScreen(),
         '/signup': (context) => const SignUpScreen(),
-        '/first_inputs': (context) => const FirstUserInputsScreen(),
         '/forgot': (context) => const ForgotPasswordScreen(),
+        '/first_inputs': (context) => const FirstUserInputsScreen(),
         '/your_gym': (context) => const YourGymScreen(),
         '/forging_exp': (context) => const ForgingExpScreen(),
         '/confirm': (context) => ConfirmationCodeScreen(
@@ -52,24 +50,47 @@ class IronCoachApp extends StatelessWidget {
             ),
         '/check_email_reset': (context) => ConfirmationCodeScreen(
               email: ModalRoute.of(context)!.settings.arguments as String,
-              resetMode: true, // Pass via args if needed; handle in constructor
+              resetMode: true,
             ),
         '/set_new_password': (context) => SetNewPasswordScreen(
               email: ModalRoute.of(context)!.settings.arguments as String,
             ),
         '/home': (context) => const HomeScreen(),
-        '/search_menu': (context) =>
-            const Scaffold(body: Center(child: Text('Search Menu'))),
-        '/stats': (context) =>
-            const Scaffold(body: Center(child: Text('Stats'))),
-        '/messages': (context) =>
-            const Scaffold(body: Center(child: Text('Messages'))),
-        '/profile': (context) =>
-            const Scaffold(body: Center(child: Text('Profile'))),
+        '/search_menu': (context) => const SearchMenuScreen(),
+        '/stats': (context) => const StatsScreen(),
+        '/messages': (context) => const MessagesScreen(),
+        '/profile': (context) => const ProfileScreen(),
+        '/subscriptions': (context) => const Scaffold(
+              body: Center(
+                child: Text(
+                  "Subscribe for UNLIMITED Auto Coach!",
+                  style: TextStyle(fontSize: 24, color: Colors.orange),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
       },
+    );
+  }
+}
 
-      // DEFAULT: Splash
-      initialRoute: '/',
+// AUTH WRAPPER — LOGGED IN → HOME, LOGGED OUT → SIGN IN
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body:
+                Center(child: CircularProgressIndicator(color: Colors.orange)),
+          );
+        }
+        return snapshot.hasData ? const HomeScreen() : const SignInScreen();
+      },
     );
   }
 }
