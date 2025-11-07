@@ -2,7 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../widgets/workout_card.dart'; // CORRECT PATH
+import '../widgets/workout_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -101,13 +101,13 @@ class _HomeScreenState extends State<HomeScreen> {
         leading: const Icon(Icons.menu, color: Colors.white),
         actions: const [
           Icon(Icons.notifications, color: Colors.white),
-          SizedBox(width: 16)
+          SizedBox(width: 16),
         ],
       ),
       body: SafeArea(
         child: Column(
           children: [
-            // TOP DROPDOWNS
+            // TOP DROPDOWNS — FULL WIDTH
             Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -131,8 +131,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            Expanded(child: WorkoutCard()),
+            // FULL-WIDTH CARD — NO PADDING
+            const WorkoutCard(),
 
+            // PUSH NAV TO BOTTOM
             const Spacer(),
 
             // BOTTOM NAV
@@ -148,6 +150,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 selectedItemColor: Colors.orange,
                 unselectedItemColor: Colors.grey,
                 type: BottomNavigationBarType.fixed,
+                showSelectedLabels: true,
+                showUnselectedLabels: true,
                 items: const [
                   BottomNavigationBarItem(
                       icon: Icon(Icons.home), label: 'Home'),
@@ -194,9 +198,12 @@ class _DropdownButton extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                    child: Text(value,
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold))),
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
                 const Icon(Icons.keyboard_arrow_down, color: Colors.orange),
               ],
             ),
@@ -232,18 +239,23 @@ class _GymCoachPicker extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(20),
-            child: Text(title,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold)),
+            child: Text(
+              title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold),
+            ),
           ),
           ...options.map((opt) => ListTile(
                 title: Text(opt, style: const TextStyle(color: Colors.white)),
                 trailing: opt == current
                     ? const Icon(Icons.check, color: Colors.orange)
                     : null,
-                onTap: () => onSelect(opt),
+                onTap: () {
+                  onSelect(opt);
+                  Navigator.pop(context);
+                },
               )),
           const SizedBox(height: 20),
         ],
