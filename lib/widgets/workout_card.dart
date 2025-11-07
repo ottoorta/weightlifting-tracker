@@ -192,12 +192,22 @@ class _WorkoutCardState extends State<WorkoutCard> {
 
   Widget _buildEmptyCard() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      margin: EdgeInsets.zero,
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.circular(24)),
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.orange.withOpacity(0.2),
+              blurRadius: 20,
+              offset: const Offset(0, 8))
+        ],
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Padding(
             padding: EdgeInsets.fromLTRB(24, 40, 24, 24),

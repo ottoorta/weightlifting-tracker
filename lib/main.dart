@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import 'screens/splash_screen.dart';
+import 'screens/splash_screen.dart'; // NOW USED
 import 'screens/sign_in_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/confirmation_code_screen.dart';
@@ -17,7 +17,7 @@ import 'screens/search_menu_screen.dart';
 import 'screens/stats_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/profile_screen.dart';
-import 'package:iron_coach/screens/workout_main.dart';
+import 'screens/workout_main.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,8 +38,9 @@ class IronCoachApp extends StatelessWidget {
         fontFamily: 'Montserrat',
         scaffoldBackgroundColor: Colors.transparent,
       ),
-      home: const AuthWrapper(), // THIS IS YOUR START
+      home: const SplashScreen(), // SPLASH FIRST
       routes: {
+        '/splash': (context) => const SplashScreen(),
         '/signin': (context) => const SignInScreen(),
         '/signup': (context) => const SignUpScreen(),
         '/forgot': (context) => const ForgotPasswordScreen(),

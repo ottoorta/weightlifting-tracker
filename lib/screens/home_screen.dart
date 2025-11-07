@@ -107,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // TOP DROPDOWNS — FULL WIDTH
+            // TOP DROPDOWNS
             Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -131,13 +131,16 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // FULL-WIDTH CARD — NO PADDING
-            const WorkoutCard(),
+            // CARD — HUGS CONTENT
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: WorkoutCard(),
+            ),
 
             // PUSH NAV TO BOTTOM
             const Spacer(),
 
-            // BOTTOM NAV
+            // BOTTOM NAV — FIXED
             Container(
               decoration: const BoxDecoration(
                 color: Color(0xFF1C1C1E),

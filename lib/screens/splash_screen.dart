@@ -57,6 +57,7 @@ class _SplashScreenState extends State<SplashScreen> {
               const Spacer(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(40, 0, 40, 60),
+                /*
                 child: ElevatedButton(
                   onPressed: () => Navigator.pushNamed(context, '/signin'),
                   style: ElevatedButton.styleFrom(
@@ -69,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   child: const Text("Sign in",
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
+                ),*/
               ),
             ],
           ),
