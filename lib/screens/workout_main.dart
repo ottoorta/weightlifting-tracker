@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart'; // ← ADDED THIS LINE
+import 'workout_exercise.dart';
 
 class WorkoutMainScreen extends StatefulWidget {
   final Map<String, dynamic> workout;
@@ -24,24 +26,68 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   int calories = 0;
   double volume = 0.0;
   bool isPublic = false;
-
+  bool isWorkoutComplete = false;
   late Timer _timer;
   final DateFormat dateFormat = DateFormat('EEEE, MMMM d');
 
   @override
-  void dispose() {
-    if (isWorkoutStarted) _timer.cancel();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkWorkoutStatus();
   }
 
-  void _startWorkout() {
+  Future<void> _checkWorkoutStatus() async {
+    final workoutDoc = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .get();
+
+    if (workoutDoc.exists) {
+      final data = workoutDoc.data()!;
+      final startTime = data['startTime'] as Timestamp?;
+      final endTime = data['endTime'] as Timestamp?;
+
+      if (startTime != null) {
+        setState(() {
+          isWorkoutStarted = true;
+          elapsedDuration = DateTime.now().difference(startTime.toDate());
+        });
+        _startTimer();
+      }
+
+      if (endTime != null) {
+        setState(() => isWorkoutComplete = true);
+      }
+    }
+  }
+
+  void _startWorkout() async {
     setState(() {
       isWorkoutStarted = true;
       elapsedDuration = Duration.zero;
-      calories = 0;
-      volume = 0.0;
     });
 
+    await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .set({'startTime': FieldValue.serverTimestamp()},
+            SetOptions(merge: true));
+
+    _startTimer();
+  }
+
+  void _finishWorkout() async {
+    await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .set(
+            {'endTime': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+    setState(() => isWorkoutComplete = true);
+    _timer.cancel();
+  }
+
+  void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         elapsedDuration = elapsedDuration + const Duration(seconds: 1);
@@ -53,6 +99,12 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return "${d.inHours}:$minutes:$seconds";
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
   }
 
   @override
@@ -78,10 +130,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
       ),
       body: Stack(
         children: [
-          // MAIN SCROLLABLE CONTENT
           SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(
-                16, 16, 16, 120), // bottom padding for FAB
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -104,9 +154,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                       ]),
                       SizedBox(height: 8),
                       Text(
-                        "Today’s Workout Details: We will focus on maximizing effort on Triceps, Quads and Calves since they are showing weakness...",
-                        style: TextStyle(color: Colors.white70),
-                      ),
+                          "Today’s Workout Details: We will focus on maximizing effort on Triceps, Quads and Calves since they are showing weakness...",
+                          style: TextStyle(color: Colors.white70)),
                     ],
                   ),
                 ),
@@ -155,12 +204,10 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // Exercises
+                // Exercises — WITH COMPLETED CHECK
                 ...widget.exercises.map((ex) => _exerciseCard(ex)).toList(),
 
                 const SizedBox(height: 24),
-
-                // SHARE + MAKE PUBLIC — NOW IN SCROLL, LEFT-ALIGNED
                 Row(children: const [
                   Icon(Icons.share, color: Colors.orange),
                   SizedBox(width: 8),
@@ -185,19 +232,20 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                   const Text("Make Public",
                       style: TextStyle(color: Colors.white)),
                 ]),
-
                 const SizedBox(height: 32),
               ],
             ),
           ),
 
-          // FLOATING START BUTTON — ONLY THIS IS POSITIONED
+          // FLOATING BUTTON
           Positioned(
             bottom: 52,
             left: 16,
             right: 16,
             child: ElevatedButton(
-              onPressed: isWorkoutStarted ? null : _startWorkout,
+              onPressed: isWorkoutComplete
+                  ? null
+                  : (isWorkoutStarted ? _finishWorkout : _startWorkout),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orange,
                 disabledBackgroundColor: Colors.orange.withOpacity(0.5),
@@ -205,7 +253,9 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                 shape: const StadiumBorder(),
               ),
               child: Text(
-                isWorkoutStarted ? "WORKOUT IN PROGRESS" : "START WORKOUT",
+                isWorkoutComplete
+                    ? "WORKOUT COMPLETE"
+                    : (isWorkoutStarted ? "FINISH WORKOUT" : "START WORKOUT"),
                 style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -231,105 +281,109 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
       );
 
   Widget _exerciseCard(Map<String, dynamic> ex) {
-    // DEBUG: See raw data
-    print("Raw exercise data: $ex");
+    return FutureBuilder<bool>(
+      future: _isExerciseComplete(ex),
+      builder: (context, snapshot) {
+        final bool isComplete = snapshot.data ?? false;
 
-    // Extract lists
-    final List<dynamic> muscleNames = ex['muscles'] ?? [];
-    final List<dynamic> muscleValues = ex['muscleDistribution'] ?? [];
-
-    // Build proper Map<String, int>
-    final Map<String, int> musclesDist = {};
-    for (int i = 0; i < muscleNames.length && i < muscleValues.length; i++) {
-      final name = muscleNames[i].toString();
-      final value = int.tryParse(muscleValues[i].toString()) ?? 0;
-      if (value > 0) {
-        musclesDist[name] = value;
-      }
-    }
-
-    print(
-        "Built musclesDist: $musclesDist"); // Should show: {Shoulders: 80, Trapezius: 20}
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // DOMINANT IMAGE
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.network(
-              ex['imageUrl'] ?? '',
-              width: 90,
-              height: 90,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                width: 90,
-                height: 90,
-                color: Colors.grey,
-                child: const Icon(Icons.fitness_center, color: Colors.white54),
+        return GestureDetector(
+          onTap: () async {
+            if (!isWorkoutStarted) _startWorkout();
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => WorkoutExerciseScreen(
+                  exercise: ex,
+                  workoutId: widget.workout['id'],
+                ),
               ),
+            );
+            setState(() {}); // Refresh completion status
+          },
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isComplete ? Colors.orange : const Color(0xFF1C1C1E),
+              borderRadius: BorderRadius.circular(20),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  ex['name'] ?? 'Exercise',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    ex['imageUrl'] ?? '',
+                    width: 90,
+                    height: 90,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 90,
+                      height: 90,
+                      color: Colors.grey,
+                      child: const Icon(Icons.fitness_center,
+                          color: Colors.white54),
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  "${ex['sets'] ?? 4} sets • ${ex['reps'] ?? '10-12'} reps • ${ex['weight'] ?? '20'} kg",
-                  style: const TextStyle(color: Colors.white60, fontSize: 14),
-                ),
-                const SizedBox(height: 10),
-
-                // MUSCLE BADGES — NOW 100% WORKING
-                if (musclesDist.isNotEmpty)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: musclesDist.entries.map((e) {
-                      return Container(
-                        child: Text(
-                          "${e.key} ${e.value}%",
-                          style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ex['name'] ?? 'Exercise',
+                        style: TextStyle(
+                            color: isComplete ? Colors.white : Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        "${ex['sets'] ?? 4} sets • ${ex['reps'] ?? '10-12'} reps • ${ex['weight'] ?? '20'} kg",
+                        style: TextStyle(
+                            color: isComplete ? Colors.white70 : Colors.white60,
+                            fontSize: 14),
+                      ),
+                      if (isComplete)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Text("COMPLETED",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12)),
                         ),
-                      );
-                    }).toList(),
-                  )
-                else
-                  const Text("No muscle data",
-                      style: TextStyle(color: Colors.white30, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Icon(Icons.more_vert, color: Colors.orange),
+                ),
               ],
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
-            child: Icon(Icons.more_vert, color: Colors.orange),
-          ),
-        ],
-      ),
+        );
+      },
     );
+  }
+
+  Future<bool> _isExerciseComplete(Map<String, dynamic> ex) async {
+    final exerciseId = ex['id'] ?? ex['exerciseId'] ?? 'unknown';
+    final snapshot = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .collection('logged_sets')
+        .where('exerciseId', isEqualTo: exerciseId)
+        .get();
+
+    final totalSets = ex['sets'] ?? 4;
+    return snapshot.docs.length >= totalSets;
   }
 }
 
-// MuscleTargetChip stays the same — already perfect
+// MuscleTargetChip — unchanged
 class MuscleTargetChip extends StatelessWidget {
   final String name;
   final int percent;
