@@ -28,53 +28,46 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/images/splash_bg.jpg'),
-            fit: BoxFit.cover,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset('assets/images/splash_bg.jpg', fit: BoxFit.cover),
+          Container(color: const Color(0x80000000)),
+          SafeArea(
+            child: Column(
+              children: [
+                const Spacer(),
+                const Text('IRON COACH',
+                    style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 3)),
+                const SizedBox(height: 12),
+                const Text('Bring the best out of you!',
+                    style: TextStyle(fontSize: 20, color: Colors.white70)),
+                const Spacer(flex: 2),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  /*child: ElevatedButton(
+                    onPressed: () => Navigator.pushNamed(context, '/signin'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text('Sign in',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                  ),*/
+                ),
+                const SizedBox(height: 60),
+              ],
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              const Spacer(),
-              const Text(
-                "IRON COACH",
-                style: TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 4),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                "Bring the best out of you!",
-                style: TextStyle(fontSize: 20, color: Colors.white70),
-              ),
-              const Spacer(),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(40, 0, 40, 60),
-                /*
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pushNamed(context, '/signin'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
-                    minimumSize: const Size(double.infinity, 56),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                  ),
-                  child: const Text("Sign in",
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ),*/
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }

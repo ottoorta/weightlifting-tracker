@@ -144,7 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               decoration: const BoxDecoration(
                 color: Color(0xFF1C1C1E),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: BottomNavigationBar(
                 currentIndex: _selectedIndex,
@@ -188,7 +188,7 @@ class _DropdownButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: Colors.grey[900],
           borderRadius: BorderRadius.circular(12),
@@ -235,13 +235,13 @@ class _GymCoachPicker extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(10),
             child: Text(
               title,
               style: const TextStyle(

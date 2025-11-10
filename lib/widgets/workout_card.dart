@@ -56,11 +56,12 @@ class _WorkoutCardState extends State<WorkoutCard> {
     return InkWell(
       onTap: _navigateToWorkoutMain, // FULL CARD TAP
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        margin: const EdgeInsets.symmetric(
+            horizontal: 0, vertical: 8), //horiz size change otto
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: const Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
                 color: Colors.orange.withOpacity(0.2),
@@ -171,14 +172,14 @@ class _WorkoutCardState extends State<WorkoutCard> {
         onPressed: onTap,
         icon: Transform.rotate(
           angle: _isTomorrow && icon == Icons.skip_next ? 3.14 : 0,
-          child: Icon(icon, color: Colors.white, size: 20),
+          child: Icon(icon, color: Colors.white, size: 24),
         ),
         label: FittedBox(
           fit: BoxFit.scaleDown,
           child: Text(
             label,
             style: const TextStyle(
-                color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
             maxLines: 1,
           ),
         ),
