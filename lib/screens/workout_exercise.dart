@@ -49,6 +49,21 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     _extractAndLoadExerciseId();
   }
 
+  // ADD SET METHOD — THIS WAS MISSING!
+  void _addSet() {
+    if (widget.isViewOnly) return;
+    setState(() {
+      sets.add({
+        'set': sets.length + 1,
+        'reps': 10.0,
+        'kg': null,
+        'rir': 0.0,
+        'isMax': false,
+        'isLogged': false,
+      });
+    });
+  }
+
   Future<void> _extractAndLoadExerciseId() async {
     sets.clear();
     isWorkoutComplete = false;
@@ -59,7 +74,6 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       final String? directId = widget.exercise['id']?.toString();
       if (directId != null && directId.isNotEmpty && directId != 'unknown') {
         exerciseId = directId;
-        debugPrint('DIRECT ID: $exerciseId');
         await _loadUserDataAndSets();
         return;
       }
@@ -121,24 +135,18 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
       if (userDoc.exists) {
         setState(() {
-          // Safe goal loading
           userGoal = userDoc.get('physicalGoal') ??
               userDoc.get('physical_goal') ??
               userDoc.get('goal') ??
               'build muscle';
 
-          // SINGLE GLOBAL REST TIME — CLEAN & SIMPLE
           final savedSeconds = userDoc.get('defaultRestTime') ?? 180;
           defaultRestDuration = Duration(seconds: savedSeconds);
           restDuration = defaultRestDuration;
-          debugPrint('Global rest time loaded: ${savedSeconds}s');
         });
-      } else {
-        debugPrint('User doc missing — using defaults');
-        userGoal = 'build muscle';
       }
 
-      // Notes (safe)
+      // Load notes
       try {
         final noteQuery = await FirebaseFirestore.instance
             .collection('exercises_notes')
@@ -155,10 +163,10 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
           });
         }
       } catch (e) {
-        debugPrint('Notes failed: $e');
+        debugPrint('Notes load failed: $e');
       }
 
-      // Logged sets
+      // Load logged sets
       try {
         final loggedSetsQuery = await FirebaseFirestore.instance
             .collection('workouts')
@@ -221,25 +229,23 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    restTimer?.cancel();
-    _audioPlayer.dispose();
-    super.dispose();
-  }
-
-  void _addSet() {
-    if (widget.isViewOnly) return;
+  void _deleteSet(int index) async {
+    final set = sets[index];
+    if (set['isLogged'] == true && set['docId'] != null) {
+      await FirebaseFirestore.instance
+          .collection('workouts')
+          .doc(widget.workoutId)
+          .collection('logged_sets')
+          .doc(set['docId'])
+          .delete();
+    }
     setState(() {
-      sets.add({
-        'set': sets.length + 1,
-        'reps': 10.0,
-        'kg': null,
-        'rir': 0.0,
-        'isMax': false,
-        'isLogged': false,
-      });
+      sets.removeAt(index);
+      for (int i = index; i < sets.length; i++) {
+        sets[i]['set'] = i + 1;
+      }
     });
+    _updateTotals();
   }
 
   void _updateTotals() {
@@ -253,7 +259,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         totalReps += reps.toInt();
         totalVolume += reps * kg;
         totalCalories += reps * kg * 0.05;
-        maxWeight = max(maxWeight, kg);
+        if (kg > maxWeight) maxWeight = kg;
         final calc1RM = kg * (1 + reps / 30);
         if (calc1RM > oneRepMax) {
           oneRepMax = calc1RM;
@@ -261,6 +267,17 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         }
       }
     }
+
+    // Update isMax flags
+    for (var set in sets) {
+      final reps = set['reps'] as double?;
+      final kg = set['kg'] as double?;
+      if (reps != null && kg != null && set['isLogged'] == true) {
+        final calc1RM = kg * (1 + reps / 30);
+        set['isMax'] = calc1RM >= oneRepMax;
+      }
+    }
+
     setState(() {});
   }
 
@@ -325,7 +342,6 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     }
   }
 
-  // CLEAN SAVE — ONLY ONE FIELD: defaultRestTime
   Future<void> _saveToFirestore() async {
     if (user == null) return;
 
@@ -413,7 +429,6 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                     ),
                   ],
 
-                  // IMAGE + TOTALS + SETS + REST TIMER (unchanged)
                   GestureDetector(
                     onTap: () => Navigator.pushNamed(context, '/instructions'),
                     child: ClipRRect(
@@ -434,41 +449,79 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                             'Volume', '${totalVolume.toStringAsFixed(0)} Kg'),
                       ]),
                   const SizedBox(height: 24),
-                  ...sets.map((s) {
+
+                  // SWIPE TO DELETE + CUPS
+                  ...sets.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final s = entry.value;
                     final logged = s['isLogged'] == true;
-                    return Card(
-                      color: logged
-                          ? Colors.orange.withOpacity(0.2)
-                          : const Color(0xFF1C1C1E),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(children: [
-                          Text(logged ? 'Set ${s['set']}' : 'Set ${s['set']}',
-                              style: TextStyle(
-                                  color: logged ? Colors.orange : Colors.white,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 12),
-                          _numberInput(
-                              (val) => setState(
-                                  () => s['reps'] = double.tryParse(val) ?? 0),
-                              s['reps']?.toInt().toString() ?? '',
-                              logged),
-                          _numberInput(
-                              (val) => setState(
-                                  () => s['kg'] = double.tryParse(val) ?? 0),
-                              s['kg']?.toString().replaceAll('.0', '') ?? '',
-                              logged),
-                          _numberInput(
-                              (val) => setState(
-                                  () => s['rir'] = double.tryParse(val) ?? 0),
-                              s['rir']?.toInt().toString() ?? '',
-                              logged),
-                        ]),
+                    final is1RM = s['isMax'] == true;
+                    final isMaxWeight =
+                        s['kg'] == maxWeight && s['isLogged'] == true;
+
+                    return Dismissible(
+                      key: Key('${s['set']}_${s['docId'] ?? index}'),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        color: Colors.red,
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        child: const Icon(Icons.delete,
+                            color: Colors.white, size: 30),
+                      ),
+                      onDismissed: (_) => _deleteSet(index),
+                      child: Card(
+                        color: logged
+                            ? Colors.orange.withOpacity(0.2)
+                            : const Color(0xFF1C1C1E),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(children: [
+                            SizedBox(
+                              width: 60,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  if (is1RM)
+                                    const Icon(Icons.emoji_events,
+                                        color: Colors.amber, size: 20),
+                                  if (isMaxWeight && !is1RM)
+                                    const Icon(Icons.emoji_events_outlined,
+                                        color: Colors.orange, size: 20),
+                                  if (!is1RM && !isMaxWeight)
+                                    Text('Set ${s['set']}',
+                                        style: TextStyle(
+                                            color: logged
+                                                ? Colors.orange
+                                                : Colors.white,
+                                            fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _numberInput(
+                                (val) => setState(() =>
+                                    s['reps'] = double.tryParse(val) ?? 0),
+                                s['reps']?.toInt().toString() ?? '',
+                                logged),
+                            _numberInput(
+                                (val) => setState(
+                                    () => s['kg'] = double.tryParse(val) ?? 0),
+                                s['kg']?.toString().replaceAll('.0', '') ?? '',
+                                logged),
+                            _numberInput(
+                                (val) => setState(
+                                    () => s['rir'] = double.tryParse(val) ?? 0),
+                                s['rir']?.toInt().toString() ?? '',
+                                logged),
+                          ]),
+                        ),
                       ),
                     );
                   }).toList(),
+
                   const SizedBox(height: 20),
                   Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -485,13 +538,14 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                           const Text('Rest: ',
                               style: TextStyle(color: Colors.white)),
                           Text(
-                              isResting
-                                  ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
-                                  : '${defaultRestDuration.inMinutes}:00',
-                              style: const TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18)),
+                            isResting
+                                ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
+                                : '${defaultRestDuration.inMinutes}:${(defaultRestDuration.inSeconds % 60).toString().padLeft(2, '0')}',
+                            style: const TextStyle(
+                                color: Colors.orange,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18),
+                          ),
                           if (!widget.isViewOnly) ...[
                             IconButton(
                                 icon: const Icon(Icons.remove_circle_outline,
