@@ -22,7 +22,7 @@ class WorkoutMainScreen extends StatefulWidget {
 
 class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   bool isWorkoutStarted = false;
-  bool isWorkoutComplete = false;
+  bool isWorkoutCompleted = false;
   Duration elapsedDuration = Duration.zero;
   int calories = 0;
   double volume = 0.0;
@@ -35,6 +35,12 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     _checkWorkoutStatus();
   }
 
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
   Future<void> _checkWorkoutStatus() async {
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
@@ -45,7 +51,19 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
 
     final data = workoutDoc.data()!;
     final startTime = data['startTime'] as Timestamp?;
-    final endTime = data['endTime'] as Timestamp?;
+    final completedAt = data['completedAt'] as Timestamp?;
+
+    if (completedAt != null) {
+      setState(() {
+        isWorkoutCompleted = true;
+        isWorkoutStarted = true;
+      });
+      if (startTime != null) {
+        elapsedDuration = completedAt.toDate().difference(startTime.toDate());
+      }
+      await _calculateTotals();
+      return;
+    }
 
     if (startTime != null) {
       setState(() {
@@ -53,30 +71,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
         elapsedDuration = DateTime.now().difference(startTime.toDate());
       });
       _startTimer();
-    }
-
-    if (endTime != null) {
-      setState(() {
-        isWorkoutComplete = true;
-      });
-      if (_timer.isActive) _timer.cancel();
-    } else if (isWorkoutStarted) {
       await _calculateTotals();
-      final allComplete = await _areAllExercisesComplete();
-      if (allComplete && mounted) {
-        await _finishWorkout();
-      }
     }
-  }
-
-  Future<bool> _areAllExercisesComplete() async {
-    for (var ex in widget.exercises) {
-      final exerciseId = await _getExerciseId(ex);
-      final loggedCount = await _getLoggedSetsCount(exerciseId);
-      final totalSets = ex['sets'] ?? 4;
-      if (loggedCount < totalSets) return false;
-    }
-    return true;
   }
 
   Future<String> _getExerciseId(Map<String, dynamic> ex) async {
@@ -89,8 +85,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
 
     final data = workoutDoc.data()!;
     final List<dynamic> exerciseIds = data['exerciseIds'] ?? [];
-
     final exerciseName = ex['name']?.toString().toLowerCase() ?? '';
+
     for (String id in exerciseIds) {
       final exDoc = await FirebaseFirestore.instance
           .collection('exercises')
@@ -105,7 +101,6 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   }
 
   Future<int> _getLoggedSetsCount(String exerciseId) async {
-    if (exerciseId == 'unknown') return 0;
     final snapshot = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -116,15 +111,11 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   }
 
   Future<void> _calculateTotals() async {
-    if (!mounted) return;
-
     int totalCal = 0;
     double totalVol = 0.0;
 
     for (var ex in widget.exercises) {
       final exerciseId = await _getExerciseId(ex);
-      if (exerciseId == 'unknown') continue;
-
       final snapshot = await FirebaseFirestore.instance
           .collection('workouts')
           .doc(widget.workout['id'])
@@ -141,12 +132,10 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
       }
     }
 
-    if (mounted) {
-      setState(() {
-        calories = totalCal;
-        volume = totalVol;
-      });
-    }
+    setState(() {
+      calories = totalCal;
+      volume = totalVol;
+    });
   }
 
   void _startWorkout() async {
@@ -163,16 +152,47 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   }
 
   Future<void> _finishWorkout() async {
+    final now = FieldValue.serverTimestamp();
+
+    // 1. Mark as completed
     await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
-        .set(
-            {'endTime': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+        .set({
+      'endTime': now,
+      'completedAt': now,
+    }, SetOptions(merge: true));
 
-    if (mounted) {
-      setState(() => isWorkoutComplete = true);
-      if (_timer.isActive) _timer.cancel();
+    // 2. Clean up empty exercises
+    final workoutDoc = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .get();
+    final data = workoutDoc.data()!;
+    final List<dynamic> exerciseIds = List.from(data['exerciseIds'] ?? []);
+
+    final List<String> idsToRemove = [];
+
+    for (String exId in exerciseIds) {
+      final loggedCount = await _getLoggedSetsCount(exId);
+      if (loggedCount == 0) {
+        idsToRemove.add(exId);
+      }
     }
+
+    if (idsToRemove.isNotEmpty) {
+      await FirebaseFirestore.instance
+          .collection('workouts')
+          .doc(widget.workout['id'])
+          .update({
+        'exerciseIds': FieldValue.arrayRemove(idsToRemove),
+      });
+    }
+
+    setState(() {
+      isWorkoutCompleted = true;
+    });
+    _timer.cancel();
   }
 
   void _startTimer() {
@@ -188,15 +208,10 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   }
 
   String _formatDuration(Duration d) {
+    final hours = d.inHours.toString().padLeft(2, '0');
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return "${d.inHours}:$minutes:$seconds";
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    super.dispose();
+    return "$hours:$minutes:$seconds";
   }
 
   @override
@@ -206,18 +221,20 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
         : 'Today';
 
     String buttonText;
-    Color buttonColor = Colors.orange;
+    Color buttonColor;
     VoidCallback? onPressed;
 
-    if (isWorkoutComplete) {
+    if (isWorkoutCompleted || widget.workout['completedAt'] != null) {
       buttonText = "WORKOUT COMPLETED";
-      buttonColor = Colors.green;
+      buttonColor = Colors.grey;
       onPressed = null;
     } else if (isWorkoutStarted) {
-      buttonText = "WORKOUT IN PROGRESS";
+      buttonText = "FINISH WORKOUT";
+      buttonColor = Colors.green;
       onPressed = _finishWorkout;
     } else {
       buttonText = "START WORKOUT";
+      buttonColor = Colors.orange;
       onPressed = _startWorkout;
     }
 
@@ -243,6 +260,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ... your existing UI (coach card, muscles, stats, exercises)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -291,11 +309,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _statBox(
-                        "Duration",
-                        isWorkoutStarted
-                            ? _formatDuration(elapsedDuration)
-                            : "30 mins"),
+                    _statBox("Duration", _formatDuration(elapsedDuration)),
                     _statBox("Calories", "$calories kcal"),
                     _statBox("Volume", "${volume.toStringAsFixed(0)} Kg"),
                   ],
@@ -306,6 +320,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
               ],
             ),
           ),
+          // BUTTON ALWAYS VISIBLE
           Positioned(
             bottom: 52,
             left: 16,
@@ -314,7 +329,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
               onPressed: onPressed,
               style: ElevatedButton.styleFrom(
                 backgroundColor: buttonColor,
-                disabledBackgroundColor: buttonColor.withOpacity(0.5),
+                disabledBackgroundColor: Colors.grey,
                 minimumSize: const Size(double.infinity, 56),
                 shape: const StadiumBorder(),
               ),
@@ -348,8 +363,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     return FutureBuilder<String>(
       future: _getExerciseId(ex),
       builder: (context, idSnapshot) {
-        if (!idSnapshot.hasData || idSnapshot.data == 'unknown') {
-          return const SizedBox.shrink();
+        if (!idSnapshot.hasData) {
+          return const SizedBox.shrink(); // Or loading placeholder
         }
         final exerciseId = idSnapshot.data!;
         return FutureBuilder<int>(
@@ -358,27 +373,21 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
             final loggedCount = countSnapshot.data ?? 0;
             final totalSets = ex['sets'] ?? 4;
             final isComplete = loggedCount >= totalSets;
+            final hasProgress = loggedCount > 0;
 
             return GestureDetector(
               onTap: () async {
                 if (!isWorkoutStarted) _startWorkout();
-
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => WorkoutExerciseScreen(
-                      exercise: {
-                        ...ex,
-                        'id': exerciseId, // PASS THE REAL ID
-                      },
+                      exercise: ex,
                       workoutId: widget.workout['id'],
-                      isViewOnly: isWorkoutComplete,
+                      isViewOnly: isWorkoutCompleted,
                     ),
                   ),
                 );
-
-                if (!mounted) return;
-
                 await _checkWorkoutStatus();
                 await _calculateTotals();
               },
@@ -386,7 +395,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                 margin: const EdgeInsets.only(bottom: 20),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isComplete ? Colors.orange : const Color(0xFF1C1C1E),
+                  color: hasProgress ? Colors.orange : const Color(0xFF1C1C1E),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -395,16 +404,14 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: Image.network(
-                        ex['imageUrl']?.toString().isNotEmpty == true
-                            ? ex['imageUrl']
-                            : 'https://via.placeholder.com/90',
+                        ex['imageUrl'] ?? '',
                         width: 90,
                         height: 90,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(
                           width: 90,
                           height: 90,
-                          color: Colors.grey[800],
+                          color: Colors.grey,
                           child: const Icon(Icons.fitness_center,
                               color: Colors.white54),
                         ),
@@ -418,7 +425,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                           Text(
                             ex['name'] ?? 'Exercise',
                             style: TextStyle(
-                                color: isComplete ? Colors.white : Colors.white,
+                                color:
+                                    hasProgress ? Colors.white : Colors.white,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 18),
                           ),
@@ -426,7 +434,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                           Text(
                             "${ex['sets'] ?? 4} sets • ${ex['reps'] ?? '10-12'} reps • ${ex['weight'] ?? '20'} kg",
                             style: TextStyle(
-                                color: isComplete
+                                color: hasProgress
                                     ? Colors.white70
                                     : Colors.white60,
                                 fontSize: 14),
@@ -442,7 +450,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                                     fontSize: 12),
                               ),
                             ),
-                          if (!isComplete && loggedCount > 0)
+                          if (!isComplete && hasProgress)
                             Padding(
                               padding: const EdgeInsets.only(top: 8),
                               child: Text(
@@ -469,6 +477,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   }
 }
 
+// MuscleTargetChip — unchanged
 class MuscleTargetChip extends StatelessWidget {
   final String name;
   final int percent;
@@ -500,7 +509,7 @@ class MuscleTargetChip extends StatelessWidget {
                       width: 40, height: 40, fit: BoxFit.cover),
                 );
               }
-              return Container(width: 40, height: 40, color: Colors.grey[800]);
+              return Container(width: 40, height: 40, color: Colors.grey);
             },
           ),
           const SizedBox(width: 8),
