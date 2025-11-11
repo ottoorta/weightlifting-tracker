@@ -57,14 +57,18 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     errorMessage = null;
 
     try {
-      // 1. TRY DIRECT ID FROM PASSED EXERCISE
+      // 1. DIRECT ID FROM PASSED EXERCISE (THIS IS NOW 100% RELIABLE)
       final String? directId = widget.exercise['id']?.toString();
       if (directId != null && directId.isNotEmpty && directId != 'unknown') {
         exerciseId = directId;
-        debugPrint('USING DIRECT ID: $exerciseId');
+        debugPrint(
+            'DIRECT ID SUCCESS: $exerciseId - ${widget.exercise['name']}');
         await _loadUserDataAndSets();
         return;
       }
+
+      debugPrint(
+          'NO DIRECT ID FOUND for ${widget.exercise['name']}, trying fallback...');
 
       // 2. FALLBACK: GET FROM workout.exerciseIds ARRAY
       final workoutDoc = await FirebaseFirestore.instance
