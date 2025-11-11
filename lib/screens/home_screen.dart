@@ -22,22 +22,41 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final doc =
-        await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    if (!doc.exists) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-    setState(() {
-      _currentGym = doc['gymName'] ?? 'Home Gym';
-      final coach = doc['selectedCoach'] ?? 'No Coach';
-      _currentCoach = coach == 'auto'
-          ? 'Auto Coach'
-          : coach == 'ai'
-              ? 'AI Coach'
-              : coach == 'pro'
-                  ? 'Pro Coach'
-                  : 'No Coach';
-    });
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!doc.exists) return;
+
+      setState(() {
+        _currentGym = [
+          doc.get('gymName'),
+          doc.get('gym_name'),
+          doc.get('gym'),
+        ].firstWhere((g) => g != null, orElse: () => 'Home Gym');
+
+        final coachCode = [
+          doc.get('selectedCoach'),
+          doc.get('coach'),
+          doc.get('selected_coach'),
+        ].firstWhere((c) => c != null, orElse: () => null);
+
+        _currentCoach = coachCode == 'auto'
+            ? 'Auto Coach'
+            : coachCode == 'ai'
+                ? 'AI Coach'
+                : coachCode == 'pro'
+                    ? 'Pro Coach'
+                    : 'No Coach';
+      });
+    } catch (e) {
+      debugPrint('Home load error: $e');
+    }
   }
 
   void _showGymPicker() => showModalBottomSheet(
@@ -52,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
             await FirebaseFirestore.instance
                 .collection('users')
                 .doc(uid)
-                .update({'gymName': gym});
+                .set({'gymName': gym}, SetOptions(merge: true));
             setState(() => _currentGym = gym);
             Navigator.pop(context);
           },
@@ -75,10 +94,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     : coach == 'Pro Coach'
                         ? 'pro'
                         : null;
+
             await FirebaseFirestore.instance
                 .collection('users')
                 .doc(uid)
-                .update({'selectedCoach': code});
+                .set({'selectedCoach': code}, SetOptions(merge: true));
+
             setState(() => _currentCoach = coach);
             Navigator.pop(context);
           },
@@ -131,16 +152,15 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // CARD — HUGS CONTENT
+            // WORKOUT CARD
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: WorkoutCard(),
             ),
 
-            // PUSH NAV TO BOTTOM
             const Spacer(),
 
-            // BOTTOM NAV — FIXED
+            // BOTTOM NAV
             Container(
               decoration: const BoxDecoration(
                 color: Color(0xFF1C1C1E),
@@ -180,8 +200,11 @@ class _HomeScreenState extends State<HomeScreen> {
 class _DropdownButton extends StatelessWidget {
   final String label, value;
   final VoidCallback onTap;
-  const _DropdownButton(
-      {required this.label, required this.value, required this.onTap});
+  const _DropdownButton({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -196,8 +219,10 @@ class _DropdownButton extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label,
-                style: const TextStyle(color: Colors.orange, fontSize: 12)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.orange, fontSize: 12),
+            ),
             Row(
               children: [
                 Expanded(
@@ -257,7 +282,6 @@ class _GymCoachPicker extends StatelessWidget {
                     : null,
                 onTap: () {
                   onSelect(opt);
-                  Navigator.pop(context);
                 },
               )),
           const SizedBox(height: 20),

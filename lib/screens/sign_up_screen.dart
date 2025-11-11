@@ -67,6 +67,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         'verificationTime': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
         'verified': false,
+        'defaultRestTime': 180, // 3 minutes
       });
 
       // 3. (Optional) Trigger Cloud Function to send email

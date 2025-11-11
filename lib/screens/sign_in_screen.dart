@@ -70,6 +70,7 @@ class _SignInScreenState extends State<SignInScreen> {
         'photoUrl': FirebaseAuth.instance.currentUser!.photoURL,
         'createdAt': FieldValue.serverTimestamp(),
         'verified': true,
+        'defaultRestTime': 180, // 3 minutes
       });
     }
   }
