@@ -1,6 +1,5 @@
 // lib/screens/workout_exercise.dart
 import 'dart:async';
-import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -31,6 +30,8 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   double maxWeight = 0.0;
   bool isFavorite = false;
   String notes = '';
+  final TextEditingController _notesController = TextEditingController();
+
   Duration restDuration = const Duration(minutes: 3);
   Duration defaultRestDuration = const Duration(minutes: 3);
   Timer? restTimer;
@@ -38,10 +39,13 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   bool isWorkoutComplete = false;
   bool isLoading = true;
   String? errorMessage;
+
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? userGoal;
   final user = FirebaseAuth.instance.currentUser;
   String exerciseId = 'unknown';
+
+  int _uniqueIdCounter = 0; // NEW: For stable unique IDs
 
   @override
   void initState() {
@@ -49,7 +53,14 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     _extractAndLoadExerciseId();
   }
 
-  // ADD SET METHOD — THIS WAS MISSING!
+  @override
+  void dispose() {
+    restTimer?.cancel();
+    _notesController.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
   void _addSet() {
     if (widget.isViewOnly) return;
     setState(() {
@@ -60,6 +71,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         'rir': 0.0,
         'isMax': false,
         'isLogged': false,
+        'uniqueId': _uniqueIdCounter++, // NEW: Permanent unique ID
       });
     });
   }
@@ -67,8 +79,11 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   Future<void> _extractAndLoadExerciseId() async {
     sets.clear();
     isWorkoutComplete = false;
-    isLoading = true;
-    errorMessage = null;
+    if (!mounted) return;
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
 
     try {
       final String? directId = widget.exercise['id']?.toString();
@@ -116,6 +131,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   Future<void> _loadUserDataAndSets() async {
+    if (!mounted) return;
     sets.clear();
     isWorkoutComplete = false;
 
@@ -160,6 +176,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
           setState(() {
             isFavorite = data['favorite'] == true;
             notes = data['notes'] ?? '';
+            _notesController.text = notes;
           });
         }
       } catch (e) {
@@ -187,6 +204,8 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
               'rir': data['rir'],
               'isMax': data['isMax'] ?? false,
               'isLogged': true,
+              'uniqueId':
+                  doc.id, // NEW: Use doc.id as stable unique ID for logged sets
             };
           }).toList();
           isWorkoutComplete = true;
@@ -205,7 +224,9 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       _setupSets();
     } finally {
       _updateTotals();
-      setState(() => isLoading = false);
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
   }
 
@@ -225,26 +246,41 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         'rir': 0.0,
         'isMax': false,
         'isLogged': false,
+        'uniqueId': _uniqueIdCounter++, // NEW: Permanent unique ID for defaults
       });
     }
   }
 
-  void _deleteSet(int index) async {
+  Future<void> _deleteSet(int index) async {
     final set = sets[index];
-    if (set['isLogged'] == true && set['docId'] != null) {
-      await FirebaseFirestore.instance
-          .collection('workouts')
-          .doc(widget.workoutId)
-          .collection('logged_sets')
-          .doc(set['docId'])
-          .delete();
-    }
+    final docId = set['docId'];
+    final wasLogged = set['isLogged'] == true;
+
+    // 1. Remove from UI immediately
+    if (!mounted) return;
     setState(() {
       sets.removeAt(index);
+      // Renumber 'set' for sequential logging (but keys stay stable via uniqueId)
       for (int i = index; i < sets.length; i++) {
         sets[i]['set'] = i + 1;
       }
     });
+
+    // 2. Delete from Firestore after UI removal
+    if (wasLogged && docId != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('workouts')
+            .doc(widget.workoutId)
+            .collection('logged_sets')
+            .doc(docId)
+            .delete();
+      } catch (e) {
+        debugPrint('Delete failed: $e');
+        // Optional: Snackbar for user feedback
+      }
+    }
+
     _updateTotals();
   }
 
@@ -252,48 +288,53 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     totalReps = 0;
     totalVolume = totalCalories = maxWeight = oneRepMax = 0.0;
 
-    for (var set in sets) {
-      final reps = set['reps'] as double?;
-      final kg = set['kg'] as double?;
-      if (reps != null && kg != null && set['isLogged'] == true) {
+    for (var s in sets) {
+      final reps = s['reps'] as double?;
+      final kg = s['kg'] as double?;
+      if (reps != null && kg != null && s['isLogged'] == true) {
         totalReps += reps.toInt();
         totalVolume += reps * kg;
         totalCalories += reps * kg * 0.05;
         if (kg > maxWeight) maxWeight = kg;
+
         final calc1RM = kg * (1 + reps / 30);
         if (calc1RM > oneRepMax) {
           oneRepMax = calc1RM;
-          set['isMax'] = true;
+          s['isMax'] = true;
         }
       }
     }
 
-    // Update isMax flags
-    for (var set in sets) {
-      final reps = set['reps'] as double?;
-      final kg = set['kg'] as double?;
-      if (reps != null && kg != null && set['isLogged'] == true) {
+    // Second pass for isMax flag
+    for (var s in sets) {
+      final reps = s['reps'] as double?;
+      final kg = s['kg'] as double?;
+      if (reps != null && kg != null && s['isLogged'] == true) {
         final calc1RM = kg * (1 + reps / 30);
-        set['isMax'] = calc1RM >= oneRepMax;
+        s['isMax'] = calc1RM >= oneRepMax;
       }
     }
 
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   void _startRestTimer() {
     restTimer?.cancel();
     isResting = true;
-    var remaining = restDuration;
-    setState(() {});
+    Duration remaining = restDuration;
 
     restTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       if (remaining.inSeconds <= 0) {
         timer.cancel();
-        isResting = false;
-        restDuration = defaultRestDuration;
+        setState(() {
+          isResting = false;
+          restDuration = defaultRestDuration;
+        });
         _audioPlayer.play(AssetSource('sounds/victory.mp3'));
-        setState(() {});
         return;
       }
       remaining -= const Duration(seconds: 1);
@@ -305,7 +346,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     if (widget.isViewOnly) return;
     setState(() {
       restDuration =
-          Duration(seconds: max(15, restDuration.inSeconds + seconds));
+          Duration(seconds: (restDuration.inSeconds + seconds).clamp(15, 3600));
     });
     if (isResting) _startRestTimer();
   }
@@ -314,7 +355,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     if (widget.isViewOnly) return;
 
     final currentSet =
-        sets.firstWhere((s) => s['isLogged'] == false, orElse: () => sets.last);
+        sets.firstWhere((s) => s['isLogged'] != true, orElse: () => sets.last);
     if (!currentSet['isLogged'] && currentSet['kg'] != null) {
       setState(() => currentSet['isLogged'] = true);
 
@@ -338,7 +379,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
     if (sets.every((s) => s['isLogged'] == true)) {
       setState(() => isWorkoutComplete = true);
-      _saveToFirestore();
+      await _saveToFirestore();
     }
   }
 
@@ -356,7 +397,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       'exerciseID': exerciseId,
       'userID': user!.uid,
       'favorite': isFavorite,
-      'notes': notes,
+      'notes': _notesController.text,
     }, SetOptions(merge: true));
   }
 
@@ -440,27 +481,27 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                   ),
                   const SizedBox(height: 20),
                   Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _totalBox('Total Reps', totalReps.toString()),
-                        _totalBox('Calories',
-                            '${totalCalories.toStringAsFixed(0)} kcal'),
-                        _totalBox(
-                            'Volume', '${totalVolume.toStringAsFixed(0)} Kg'),
-                      ]),
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _totalBox('Total Reps', totalReps.toString()),
+                      _totalBox('Calories',
+                          '${totalCalories.toStringAsFixed(0)} kcal'),
+                      _totalBox(
+                          'Volume', '${totalVolume.toStringAsFixed(0)} Kg'),
+                    ],
+                  ),
                   const SizedBox(height: 24),
 
-                  // SWIPE TO DELETE + CUPS
+                  // ----- SETS WITH STABLE KEYS -----
                   ...sets.asMap().entries.map((entry) {
                     final index = entry.key;
                     final s = entry.value;
                     final logged = s['isLogged'] == true;
                     final is1RM = s['isMax'] == true;
-                    final isMaxWeight =
-                        s['kg'] == maxWeight && s['isLogged'] == true;
+                    final isMaxWeight = s['kg'] == maxWeight && logged;
 
                     return Dismissible(
-                      key: Key('${s['set']}_${s['docId'] ?? index}'),
+                      key: ValueKey(s['uniqueId']), // NEW: Stable, unique key
                       direction: DismissDirection.endToStart,
                       background: Container(
                         color: Colors.red,
@@ -524,59 +565,62 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
                   const SizedBox(height: 20),
                   Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        if (!widget.isViewOnly)
-                          GestureDetector(
-                              onTap: _addSet,
-                              child: const Text('+ Add Set',
-                                  style: TextStyle(
-                                      color: Colors.orange,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold))),
-                        Row(children: [
-                          const Text('Rest: ',
-                              style: TextStyle(color: Colors.white)),
-                          Text(
-                            isResting
-                                ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
-                                : '${defaultRestDuration.inMinutes}:${(defaultRestDuration.inSeconds % 60).toString().padLeft(2, '0')}',
-                            style: const TextStyle(
-                                color: Colors.orange,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18),
-                          ),
-                          if (!widget.isViewOnly) ...[
-                            IconButton(
-                                icon: const Icon(Icons.remove_circle_outline,
-                                    color: Colors.orange),
-                                onPressed: () => _adjustRest(-15)),
-                            const Text('15s',
-                                style: TextStyle(color: Colors.orange)),
-                            IconButton(
-                                icon: const Icon(Icons.add_circle_outline,
-                                    color: Colors.orange),
-                                onPressed: () => _adjustRest(15)),
-                          ],
-                        ]),
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      if (!widget.isViewOnly)
+                        GestureDetector(
+                            onTap: _addSet,
+                            child: const Text('+ Add Set',
+                                style: TextStyle(
+                                    color: Colors.orange,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold))),
+                      Row(children: [
+                        const Text('Rest: ',
+                            style: TextStyle(color: Colors.white)),
+                        Text(
+                          isResting
+                              ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
+                              : '${defaultRestDuration.inMinutes}:${(defaultRestDuration.inSeconds % 60).toString().padLeft(2, '0')}',
+                          style: const TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18),
+                        ),
+                        if (!widget.isViewOnly) ...[
+                          IconButton(
+                              icon: const Icon(Icons.remove_circle_outline,
+                                  color: Colors.orange),
+                              onPressed: () => _adjustRest(-15)),
+                          const Text('15s',
+                              style: TextStyle(color: Colors.orange)),
+                          IconButton(
+                              icon: const Icon(Icons.add_circle_outline,
+                                  color: Colors.orange),
+                              onPressed: () => _adjustRest(15)),
+                        ],
                       ]),
+                    ],
+                  ),
                   const SizedBox(height: 20),
                   Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        Row(children: [
-                          const Icon(Icons.emoji_events, color: Colors.amber),
-                          Text(' 1RM: ${oneRepMax.toStringAsFixed(0)} kg',
-                              style: const TextStyle(color: Colors.white))
-                        ]),
-                        Row(children: [
-                          const Icon(Icons.emoji_events_outlined,
-                              color: Colors.orange),
-                          Text(' Max: ${maxWeight.toStringAsFixed(1)} kg',
-                              style: const TextStyle(color: Colors.white))
-                        ]),
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Row(children: [
+                        const Icon(Icons.emoji_events, color: Colors.amber),
+                        Text(' 1RM: ${oneRepMax.toStringAsFixed(0)} kg',
+                            style: const TextStyle(color: Colors.white))
                       ]),
+                      Row(children: [
+                        const Icon(Icons.emoji_events_outlined,
+                            color: Colors.orange),
+                        Text(' Max: ${maxWeight.toStringAsFixed(1)} kg',
+                            style: const TextStyle(color: Colors.white))
+                      ]),
+                    ],
+                  ),
                   const SizedBox(height: 24),
+
                   if (!isWorkoutComplete && !widget.isViewOnly)
                     ElevatedButton(
                       onPressed: _logOrComplete,
@@ -591,6 +635,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                           style: const TextStyle(
                               fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
+
                   if (isWorkoutComplete)
                     GestureDetector(
                       onTap: widget.isViewOnly ? null : _toggleEditMode,
@@ -611,8 +656,11 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                         ),
                       ),
                     ),
+
                   const SizedBox(height: 20),
                   TextField(
+                    controller: _notesController,
+                    enabled: !widget.isViewOnly,
                     decoration: InputDecoration(
                         hintText: 'Add notes here',
                         hintStyle: const TextStyle(color: Colors.white38),
@@ -660,8 +708,8 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                               color: Colors.orange, size: 40),
                           onPressed: () => setStateDialog(() =>
                               defaultRestDuration = Duration(
-                                  seconds: max(15,
-                                      defaultRestDuration.inSeconds - 15)))),
+                                  seconds: (defaultRestDuration.inSeconds - 15)
+                                      .clamp(15, 3600)))),
                       IconButton(
                           icon: const Icon(Icons.add_circle,
                               color: Colors.orange, size: 40),
