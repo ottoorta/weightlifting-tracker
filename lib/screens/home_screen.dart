@@ -26,25 +26,41 @@ class _HomeScreenState extends State<HomeScreen> {
     if (user == null) return;
 
     try {
-      final doc = await FirebaseFirestore.instance
+      final docSnap = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (!doc.exists) return;
+      if (!docSnap.exists) {
+        setState(() {
+          _currentGym = 'Home Gym';
+          _currentCoach = 'No Coach';
+        });
+        return;
+      }
+
+      final data = docSnap.data()!;
+
+      // SAFELY GET GYM NAME
+      final gymCandidates = [
+        data['gymName'],
+        data['gym_name'],
+        data['gym'],
+      ].where((e) => e is String && e.trim().isNotEmpty);
 
       setState(() {
-        _currentGym = [
-          doc.get('gymName'),
-          doc.get('gym_name'),
-          doc.get('gym'),
-        ].firstWhere((g) => g != null, orElse: () => 'Home Gym');
+        _currentGym =
+            gymCandidates.isNotEmpty ? gymCandidates.first : 'Home Gym';
 
-        final coachCode = [
-          doc.get('selectedCoach'),
-          doc.get('coach'),
-          doc.get('selected_coach'),
-        ].firstWhere((c) => c != null, orElse: () => null);
+        // SAFELY GET COACH
+        final coachCandidates = [
+          data['selectedCoach'],
+          data['coach'],
+          data['selected_coach'],
+        ].where((e) => e is String && e.trim().isNotEmpty);
+
+        final coachCode =
+            coachCandidates.isNotEmpty ? coachCandidates.first : null;
 
         _currentCoach = coachCode == 'auto'
             ? 'Auto Coach'
@@ -56,6 +72,10 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       debugPrint('Home load error: $e');
+      setState(() {
+        _currentGym = 'Home Gym';
+        _currentCoach = 'No Coach';
+      });
     }
   }
 
@@ -126,69 +146,67 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // TOP DROPDOWNS
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _DropdownButton(
-                      label: 'Working out at:',
-                      value: _currentGym,
-                      onTap: _showGymPicker,
+        child: SingleChildScrollView(
+          // ← THIS FIXES THE OVERFLOW!
+          child: Column(
+            children: [
+              // TOP DROPDOWNS
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _DropdownButton(
+                        label: 'Working out at:',
+                        value: _currentGym,
+                        onTap: _showGymPicker,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _DropdownButton(
-                      label: 'Select your Coach:',
-                      value: _currentCoach,
-                      onTap: _showCoachPicker,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _DropdownButton(
+                        label: 'Select your Coach:',
+                        value: _currentCoach,
+                        onTap: _showCoachPicker,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
 
-            // WORKOUT CARD
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: WorkoutCard(),
-            ),
-
-            const Spacer(),
-
-            // BOTTOM NAV
-            Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF1C1C1E),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              // WORKOUT CARD
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: WorkoutCard(),
               ),
-              child: BottomNavigationBar(
-                currentIndex: _selectedIndex,
-                onTap: _onNavTap,
-                backgroundColor: Colors.transparent,
-                selectedItemColor: Colors.orange,
-                unselectedItemColor: Colors.grey,
-                type: BottomNavigationBarType.fixed,
-                showSelectedLabels: true,
-                showUnselectedLabels: true,
-                items: const [
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.home), label: 'Home'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.search), label: 'Search'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.bar_chart), label: 'Stats'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.message), label: 'Messages'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.person), label: 'Account'),
-                ],
-              ),
-            ),
+
+              const SizedBox(height: 100), // extra space for bottom nav
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          onTap: _onNavTap,
+          backgroundColor: Colors.transparent,
+          selectedItemColor: Colors.orange,
+          unselectedItemColor: Colors.grey,
+          type: BottomNavigationBarType.fixed,
+          showSelectedLabels: true,
+          showUnselectedLabels: true,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.bar_chart), label: 'Stats'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.message), label: 'Messages'),
+            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Account'),
           ],
         ),
       ),
@@ -196,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// REUSABLE DROPDOWN
+// REUSABLE DROPDOWN + PICKER stay EXACTLY the same as before
 class _DropdownButton extends StatelessWidget {
   final String label, value;
   final VoidCallback onTap;
@@ -219,18 +237,14 @@ class _DropdownButton extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              label,
-              style: const TextStyle(color: Colors.orange, fontSize: 12),
-            ),
+            Text(label,
+                style: const TextStyle(color: Colors.orange, fontSize: 12)),
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    value,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
+                  child: Text(value,
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
                 const Icon(Icons.keyboard_arrow_down, color: Colors.orange),
               ],
@@ -242,7 +256,6 @@ class _DropdownButton extends StatelessWidget {
   }
 }
 
-// MODAL PICKER
 class _GymCoachPicker extends StatelessWidget {
   final String title, current;
   final List<String> options;
@@ -267,22 +280,18 @@ class _GymCoachPicker extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(10),
-            child: Text(
-              title,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold),
-            ),
+            child: Text(title,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold)),
           ),
           ...options.map((opt) => ListTile(
                 title: Text(opt, style: const TextStyle(color: Colors.white)),
                 trailing: opt == current
                     ? const Icon(Icons.check, color: Colors.orange)
                     : null,
-                onTap: () {
-                  onSelect(opt);
-                },
+                onTap: () => onSelect(opt),
               )),
           const SizedBox(height: 20),
         ],

@@ -34,11 +34,15 @@ class _WorkoutCardState extends State<WorkoutCard> {
 
     final muscleMap = <String, double>{};
     for (var ex in _exercises) {
-      final muscles = ex['muscles'] as List<dynamic>? ?? [];
-      final percentages = ex['muscleDistribution'] as List<dynamic>? ?? [];
+      final muscles =
+          ex['muscles'] is List ? ex['muscles'] as List : <dynamic>[];
+      final percentages = ex['muscleDistribution'] is List
+          ? ex['muscleDistribution'] as List
+          : <dynamic>[];
+
       for (int i = 0; i < muscles.length && i < percentages.length; i++) {
-        final name = muscles[i].toString();
-        final percent = (percentages[i] as num?)?.toDouble() ?? 0;
+        final name = muscles[i]?.toString() ?? 'Unknown';
+        final percent = (percentages[i] as num?)?.toDouble() ?? 0.0;
         muscleMap[name] = (muscleMap[name] ?? 0) + percent;
       }
     }
@@ -386,22 +390,54 @@ class _WorkoutCardState extends State<WorkoutCard> {
       return;
     }
 
-    final data = snapshot.docs.first.data() as Map<String, dynamic>;
-    data['id'] = snapshot.docs.first.id; // SAVE ID FOR REGENERATE
-    final ids = (data['exerciseIds'] as List).cast<String>();
+    final doc = snapshot.docs.first;
+    final data = doc.data() as Map<String, dynamic>;
+    data['id'] = doc.id; // Save ID for regenerate
+
+    // === SAFE PARSING OF exerciseIds ===
+    final rawExerciseIds = data['exerciseIds'];
+    List<String> ids = [];
+
+    if (rawExerciseIds is List) {
+      ids = rawExerciseIds.whereType<String>().toList();
+    } else if (rawExerciseIds is String && rawExerciseIds.trim().isNotEmpty) {
+      // Handle corrupted data: maybe it's a single ID or comma-separated
+      ids = rawExerciseIds
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (ids.length == 1 && ids.first.isEmpty) ids = [];
+    }
+    // If null or anything else → ids stays empty
 
     setState(() {
       _workout = data;
       _exercises = [];
     });
 
-    final exDocs = await Future.wait(ids.map((id) =>
-        FirebaseFirestore.instance.collection('exercises').doc(id).get()));
-    final exercises = exDocs
-        .where((d) => d.exists)
-        .map((d) => d.data() as Map<String, dynamic>)
-        .toList();
+    if (ids.isEmpty) {
+      setState(() => _exercises = []);
+      return;
+    }
 
-    if (mounted) setState(() => _exercises = exercises);
+    try {
+      final exDocs = await Future.wait(
+        ids.map((id) =>
+            FirebaseFirestore.instance.collection('exercises').doc(id).get()),
+      );
+
+      final exercises = exDocs
+          .where((d) => d.exists)
+          .map((d) => d.data() as Map<String, dynamic>)
+          .toList();
+
+      if (mounted) {
+        setState(() => _exercises = exercises);
+      }
+    } catch (e) {
+      debugPrint('Error loading exercises: $e');
+      if (mounted) setState(() => _exercises = []);
+    }
   }
 }
