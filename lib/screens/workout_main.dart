@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
-import 'package:firebase_auth/firebase_auth.dart'; // ← ADDED THIS LINE
+import 'package:firebase_auth/firebase_auth.dart';
 import 'workout_exercise.dart';
 
 class WorkoutMainScreen extends StatefulWidget {
@@ -22,11 +22,10 @@ class WorkoutMainScreen extends StatefulWidget {
 
 class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   bool isWorkoutStarted = false;
+  bool isWorkoutComplete = false;
   Duration elapsedDuration = Duration.zero;
   int calories = 0;
   double volume = 0.0;
-  bool isPublic = false;
-  bool isWorkoutComplete = false;
   late Timer _timer;
   final DateFormat dateFormat = DateFormat('EEEE, MMMM d');
 
@@ -42,30 +41,116 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
         .doc(widget.workout['id'])
         .get();
 
-    if (workoutDoc.exists) {
-      final data = workoutDoc.data()!;
-      final startTime = data['startTime'] as Timestamp?;
-      final endTime = data['endTime'] as Timestamp?;
+    if (!workoutDoc.exists) return;
 
-      if (startTime != null) {
-        setState(() {
-          isWorkoutStarted = true;
-          elapsedDuration = DateTime.now().difference(startTime.toDate());
-        });
-        _startTimer();
-      }
+    final data = workoutDoc.data()!;
+    final startTime = data['startTime'] as Timestamp?;
+    final endTime = data['endTime'] as Timestamp?;
 
-      if (endTime != null) {
-        setState(() => isWorkoutComplete = true);
+    if (startTime != null) {
+      setState(() {
+        isWorkoutStarted = true;
+        elapsedDuration = DateTime.now().difference(startTime.toDate());
+      });
+      _startTimer();
+    }
+
+    if (endTime != null) {
+      setState(() {
+        isWorkoutComplete = true;
+      });
+      if (_timer.isActive) _timer.cancel();
+    } else if (isWorkoutStarted) {
+      await _calculateTotals();
+      final allComplete = await _areAllExercisesComplete();
+      if (allComplete && mounted) {
+        await _finishWorkout();
       }
     }
   }
 
+  Future<bool> _areAllExercisesComplete() async {
+    for (var ex in widget.exercises) {
+      final exerciseId = await _getExerciseId(ex);
+      final loggedCount = await _getLoggedSetsCount(exerciseId);
+      final totalSets = ex['sets'] ?? 4;
+      if (loggedCount < totalSets) return false;
+    }
+    return true;
+  }
+
+  Future<String> _getExerciseId(Map<String, dynamic> ex) async {
+    final workoutDoc = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .get();
+
+    if (!workoutDoc.exists) return 'unknown';
+
+    final data = workoutDoc.data()!;
+    final List<dynamic> exerciseIds = data['exerciseIds'] ?? [];
+
+    final exerciseName = ex['name']?.toString().toLowerCase() ?? '';
+    for (String id in exerciseIds) {
+      final exDoc = await FirebaseFirestore.instance
+          .collection('exercises')
+          .doc(id)
+          .get();
+      if (exDoc.exists &&
+          exDoc['name']?.toString().toLowerCase() == exerciseName) {
+        return id;
+      }
+    }
+    return 'unknown';
+  }
+
+  Future<int> _getLoggedSetsCount(String exerciseId) async {
+    if (exerciseId == 'unknown') return 0;
+    final snapshot = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .collection('logged_sets')
+        .where('exerciseId', isEqualTo: exerciseId)
+        .get();
+    return snapshot.docs.length;
+  }
+
+  Future<void> _calculateTotals() async {
+    if (!mounted) return;
+
+    int totalCal = 0;
+    double totalVol = 0.0;
+
+    for (var ex in widget.exercises) {
+      final exerciseId = await _getExerciseId(ex);
+      if (exerciseId == 'unknown') continue;
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('workouts')
+          .doc(widget.workout['id'])
+          .collection('logged_sets')
+          .where('exerciseId', isEqualTo: exerciseId)
+          .get();
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final reps = data['reps'] as double? ?? 0;
+        final weight = data['weight'] as double? ?? 0;
+        totalVol += reps * weight;
+        totalCal += (reps * weight * 0.05).toInt();
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        calories = totalCal;
+        volume = totalVol;
+      });
+    }
+  }
+
   void _startWorkout() async {
-    setState(() {
-      isWorkoutStarted = true;
-      elapsedDuration = Duration.zero;
-    });
+    setState(() => isWorkoutStarted = true);
 
     await FirebaseFirestore.instance
         .collection('workouts')
@@ -74,21 +159,28 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
             SetOptions(merge: true));
 
     _startTimer();
+    await _calculateTotals();
   }
 
-  void _finishWorkout() async {
+  Future<void> _finishWorkout() async {
     await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
         .set(
             {'endTime': FieldValue.serverTimestamp()}, SetOptions(merge: true));
 
-    setState(() => isWorkoutComplete = true);
-    _timer.cancel();
+    if (mounted) {
+      setState(() => isWorkoutComplete = true);
+      if (_timer.isActive) _timer.cancel();
+    }
   }
 
   void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       setState(() {
         elapsedDuration = elapsedDuration + const Duration(seconds: 1);
       });
@@ -113,6 +205,22 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
         ? dateFormat.format(DateTime.parse(widget.workout['date']))
         : 'Today';
 
+    String buttonText;
+    Color buttonColor = Colors.orange;
+    VoidCallback? onPressed;
+
+    if (isWorkoutComplete) {
+      buttonText = "WORKOUT COMPLETED";
+      buttonColor = Colors.green;
+      onPressed = null;
+    } else if (isWorkoutStarted) {
+      buttonText = "WORKOUT IN PROGRESS";
+      onPressed = _finishWorkout;
+    } else {
+      buttonText = "START WORKOUT";
+      onPressed = _startWorkout;
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       appBar: AppBar(
@@ -135,7 +243,6 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Coach Note
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -160,8 +267,6 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Target Muscles
                 const Text("Target Muscles",
                     style: TextStyle(
                         color: Colors.white,
@@ -183,8 +288,6 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Stats
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -193,69 +296,30 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                         isWorkoutStarted
                             ? _formatDuration(elapsedDuration)
                             : "30 mins"),
-                    _statBox("Calories",
-                        isWorkoutStarted ? "$calories kcal" : "450 kcal"),
-                    _statBox(
-                        "Volume",
-                        isWorkoutStarted
-                            ? "${volume.toStringAsFixed(0)} Kg"
-                            : "2,358 Kg"),
+                    _statBox("Calories", "$calories kcal"),
+                    _statBox("Volume", "${volume.toStringAsFixed(0)} Kg"),
                   ],
                 ),
                 const SizedBox(height: 20),
-
-                // Exercises — WITH COMPLETED CHECK
                 ...widget.exercises.map((ex) => _exerciseCard(ex)).toList(),
-
-                const SizedBox(height: 24),
-                Row(children: const [
-                  Icon(Icons.share, color: Colors.orange),
-                  SizedBox(width: 8),
-                  Text("Share workout", style: TextStyle(color: Colors.orange)),
-                ]),
-                const SizedBox(height: 16),
-                Row(children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: Checkbox(
-                      value: isPublic,
-                      activeColor: Colors.orange,
-                      checkColor: Colors.white,
-                      side: const BorderSide(color: Colors.white, width: 2),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                      onChanged: (val) => setState(() => isPublic = val!),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text("Make Public",
-                      style: TextStyle(color: Colors.white)),
-                ]),
                 const SizedBox(height: 32),
               ],
             ),
           ),
-
-          // FLOATING BUTTON
           Positioned(
             bottom: 52,
             left: 16,
             right: 16,
             child: ElevatedButton(
-              onPressed: isWorkoutComplete
-                  ? null
-                  : (isWorkoutStarted ? _finishWorkout : _startWorkout),
+              onPressed: onPressed,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                disabledBackgroundColor: Colors.orange.withOpacity(0.5),
+                backgroundColor: buttonColor,
+                disabledBackgroundColor: buttonColor.withOpacity(0.5),
                 minimumSize: const Size(double.infinity, 56),
                 shape: const StadiumBorder(),
               ),
               child: Text(
-                isWorkoutComplete
-                    ? "WORKOUT COMPLETE"
-                    : (isWorkoutStarted ? "FINISH WORKOUT" : "START WORKOUT"),
+                buttonText,
                 style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -281,109 +345,130 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
       );
 
   Widget _exerciseCard(Map<String, dynamic> ex) {
-    return FutureBuilder<bool>(
-      future: _isExerciseComplete(ex),
-      builder: (context, snapshot) {
-        final bool isComplete = snapshot.data ?? false;
+    return FutureBuilder<String>(
+      future: _getExerciseId(ex),
+      builder: (context, idSnapshot) {
+        if (!idSnapshot.hasData || idSnapshot.data == 'unknown') {
+          return const SizedBox.shrink();
+        }
+        final exerciseId = idSnapshot.data!;
+        return FutureBuilder<int>(
+          future: _getLoggedSetsCount(exerciseId),
+          builder: (context, countSnapshot) {
+            final loggedCount = countSnapshot.data ?? 0;
+            final totalSets = ex['sets'] ?? 4;
+            final isComplete = loggedCount >= totalSets;
 
-        return GestureDetector(
-          onTap: () async {
-            if (!isWorkoutStarted) _startWorkout();
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => WorkoutExerciseScreen(
-                  exercise: ex,
-                  workoutId: widget.workout['id'],
+            return GestureDetector(
+              onTap: () async {
+                if (!isWorkoutStarted) _startWorkout();
+
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => WorkoutExerciseScreen(
+                      exercise: {
+                        ...ex,
+                        'id': exerciseId, // PASS THE REAL ID
+                      },
+                      workoutId: widget.workout['id'],
+                      isViewOnly: isWorkoutComplete,
+                    ),
+                  ),
+                );
+
+                if (!mounted) return;
+
+                await _checkWorkoutStatus();
+                await _calculateTotals();
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isComplete ? Colors.orange : const Color(0xFF1C1C1E),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.network(
+                        ex['imageUrl']?.toString().isNotEmpty == true
+                            ? ex['imageUrl']
+                            : 'https://via.placeholder.com/90',
+                        width: 90,
+                        height: 90,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          width: 90,
+                          height: 90,
+                          color: Colors.grey[800],
+                          child: const Icon(Icons.fitness_center,
+                              color: Colors.white54),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            ex['name'] ?? 'Exercise',
+                            style: TextStyle(
+                                color: isComplete ? Colors.white : Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "${ex['sets'] ?? 4} sets • ${ex['reps'] ?? '10-12'} reps • ${ex['weight'] ?? '20'} kg",
+                            style: TextStyle(
+                                color: isComplete
+                                    ? Colors.white70
+                                    : Colors.white60,
+                                fontSize: 14),
+                          ),
+                          if (isComplete)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                "$totalSets sets completed",
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12),
+                              ),
+                            ),
+                          if (!isComplete && loggedCount > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                "$loggedCount/$totalSets sets logged",
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 12),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Icon(Icons.more_vert, color: Colors.orange),
+                    ),
+                  ],
                 ),
               ),
             );
-            setState(() {}); // Refresh completion status
           },
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 20),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isComplete ? Colors.orange : const Color(0xFF1C1C1E),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    ex['imageUrl'] ?? '',
-                    width: 90,
-                    height: 90,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 90,
-                      height: 90,
-                      color: Colors.grey,
-                      child: const Icon(Icons.fitness_center,
-                          color: Colors.white54),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        ex['name'] ?? 'Exercise',
-                        style: TextStyle(
-                            color: isComplete ? Colors.white : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        "${ex['sets'] ?? 4} sets • ${ex['reps'] ?? '10-12'} reps • ${ex['weight'] ?? '20'} kg",
-                        style: TextStyle(
-                            color: isComplete ? Colors.white70 : Colors.white60,
-                            fontSize: 14),
-                      ),
-                      if (isComplete)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text("COMPLETED",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12)),
-                        ),
-                    ],
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Icon(Icons.more_vert, color: Colors.orange),
-                ),
-              ],
-            ),
-          ),
         );
       },
     );
   }
-
-  Future<bool> _isExerciseComplete(Map<String, dynamic> ex) async {
-    final exerciseId = ex['id'] ?? ex['exerciseId'] ?? 'unknown';
-    final snapshot = await FirebaseFirestore.instance
-        .collection('workouts')
-        .doc(widget.workout['id'])
-        .collection('logged_sets')
-        .where('exerciseId', isEqualTo: exerciseId)
-        .get();
-
-    final totalSets = ex['sets'] ?? 4;
-    return snapshot.docs.length >= totalSets;
-  }
 }
 
-// MuscleTargetChip — unchanged
 class MuscleTargetChip extends StatelessWidget {
   final String name;
   final int percent;
@@ -415,7 +500,7 @@ class MuscleTargetChip extends StatelessWidget {
                       width: 40, height: 40, fit: BoxFit.cover),
                 );
               }
-              return Container(width: 40, height: 40, color: Colors.grey);
+              return Container(width: 40, height: 40, color: Colors.grey[800]);
             },
           ),
           const SizedBox(width: 8),
@@ -454,4 +539,3 @@ class MuscleTargetChip extends StatelessWidget {
     }
   }
 }
-//otto

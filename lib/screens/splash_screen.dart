@@ -44,7 +44,7 @@ class _SplashScreenState extends State<SplashScreen> {
                         color: Colors.white,
                         letterSpacing: 3)),
                 const SizedBox(height: 12),
-                const Text('Bring the best out of you!',
+                const Text('Forge the best out of you!',
                     style: TextStyle(fontSize: 20, color: Colors.white70)),
                 const Spacer(flex: 2),
                 Padding(

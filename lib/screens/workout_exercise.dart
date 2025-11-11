@@ -9,11 +9,13 @@ import 'package:flutter/material.dart';
 class WorkoutExerciseScreen extends StatefulWidget {
   final Map<String, dynamic> exercise;
   final String workoutId;
+  final bool isViewOnly;
 
   const WorkoutExerciseScreen({
     super.key,
     required this.exercise,
     required this.workoutId,
+    this.isViewOnly = false,
   });
 
   @override
@@ -34,119 +36,159 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   Timer? restTimer;
   bool isResting = false;
   bool isWorkoutComplete = false;
+  bool isLoading = true;
+  String? errorMessage;
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? userGoal;
   final user = FirebaseAuth.instance.currentUser;
-  String exerciseId = 'unknown'; // ← WILL BE FIXED IN initState
+  String exerciseId = 'unknown';
 
   @override
   void initState() {
     super.initState();
+    sets.clear();
     _extractAndLoadExerciseId();
   }
 
   Future<void> _extractAndLoadExerciseId() async {
-    // 1. Get the workout document to access exerciseIds array
-    final workoutDoc = await FirebaseFirestore.instance
-        .collection('workouts')
-        .doc(widget.workoutId)
-        .get();
+    sets.clear(); // KILL OLD DATA
+    isWorkoutComplete = false;
+    isLoading = true;
+    errorMessage = null;
 
-    if (!workoutDoc.exists) {
-      exerciseId = 'unknown';
-      _loadUserDataAndSets();
-      return;
-    }
+    try {
+      // 1. TRY DIRECT ID FROM PASSED EXERCISE
+      final String? directId = widget.exercise['id']?.toString();
+      if (directId != null && directId.isNotEmpty && directId != 'unknown') {
+        exerciseId = directId;
+        debugPrint('USING DIRECT ID: $exerciseId');
+        await _loadUserDataAndSets();
+        return;
+      }
 
-    final data = workoutDoc.data()!;
-    final List<dynamic> exerciseIds = data['exerciseIds'] ?? [];
-
-    // 2. Match the current exercise name with one in the array
-    final exerciseName =
-        widget.exercise['name']?.toString().toLowerCase() ?? '';
-    String? foundId;
-
-    for (String id in exerciseIds) {
-      final exDoc = await FirebaseFirestore.instance
-          .collection('exercises')
-          .doc(id)
+      // 2. FALLBACK: GET FROM workout.exerciseIds ARRAY
+      final workoutDoc = await FirebaseFirestore.instance
+          .collection('workouts')
+          .doc(widget.workoutId)
           .get();
-      if (exDoc.exists) {
-        final exName = exDoc['name']?.toString().toLowerCase() ?? '';
-        if (exName == exerciseName) {
-          foundId = id;
-          break;
+
+      if (!workoutDoc.exists) {
+        exerciseId = 'unknown';
+        await _loadUserDataAndSets();
+        return;
+      }
+
+      final data = workoutDoc.data()!;
+      final List<dynamic> exerciseIds = data['exerciseIds'] ?? [];
+
+      // Find first valid ID
+      for (String id in exerciseIds) {
+        final doc = await FirebaseFirestore.instance
+            .collection('exercises')
+            .doc(id)
+            .get();
+        if (doc.exists) {
+          exerciseId = id;
+          debugPrint('FALLBACK ID: $exerciseId');
+          await _loadUserDataAndSets();
+          return;
         }
       }
+
+      exerciseId = 'unknown';
+    } catch (e) {
+      debugPrint('ID ERROR: $e');
+      exerciseId = 'unknown';
+    } finally {
+      if (mounted) {
+        await _loadUserDataAndSets();
+      }
     }
-
-    setState(() {
-      exerciseId = foundId ?? 'unknown';
-    });
-
-    _loadUserDataAndSets();
   }
 
   Future<void> _loadUserDataAndSets() async {
-    if (user == null) return;
+    sets.clear(); // ← THIS IS THE MAGIC LINE
+    isWorkoutComplete = false;
 
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user!.uid)
-        .get();
-    final noteQuery = await FirebaseFirestore.instance
-        .collection('exercises_notes')
-        .where('userID', isEqualTo: user!.uid)
-        .where('exerciseID', isEqualTo: exerciseId)
-        .limit(1)
-        .get();
-
-    final loggedSetsQuery = await FirebaseFirestore.instance
-        .collection('workouts')
-        .doc(widget.workoutId)
-        .collection('logged_sets')
-        .where('exerciseId', isEqualTo: exerciseId)
-        .orderBy('set')
-        .get();
-
-    if (userDoc.exists) {
+    if (user == null) {
       setState(() {
-        userGoal = userDoc['physicalGoal'] ?? 'build muscle';
-        final savedRest = userDoc['restTime_$exerciseId'] ?? 180;
-        defaultRestDuration = Duration(seconds: savedRest);
-        restDuration = defaultRestDuration;
+        isLoading = false;
+        errorMessage = 'Please sign in to track workouts.';
       });
+      return;
     }
 
-    if (noteQuery.docs.isNotEmpty) {
-      final data = noteQuery.docs.first.data();
-      setState(() {
-        isFavorite = data['favorite'] == true;
-        notes = data['notes'] ?? '';
-      });
-    }
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user!.uid)
+          .get();
 
-    if (loggedSetsQuery.docs.isNotEmpty) {
-      sets = loggedSetsQuery.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'docId': doc.id,
-          'set': data['set'],
-          'reps': data['reps'],
-          'kg': data['weight'],
-          'rir': data['rir'],
-          'isMax': data['isMax'] ?? false,
-          'isLogged': true,
-        };
-      }).toList();
-      isWorkoutComplete = true;
-    } else {
+      if (userDoc.exists) {
+        setState(() {
+          userGoal = userDoc['physicalGoal'] ?? 'build muscle';
+          final savedRest = userDoc['restTime_$exerciseId'] ?? 180;
+          defaultRestDuration = Duration(seconds: savedRest);
+          restDuration = defaultRestDuration;
+        });
+      }
+
+      final noteQuery = await FirebaseFirestore.instance
+          .collection('exercises_notes')
+          .where('userID', isEqualTo: user!.uid)
+          .where('exerciseID', isEqualTo: exerciseId)
+          .limit(1)
+          .get();
+
+      if (noteQuery.docs.isNotEmpty) {
+        final data = noteQuery.docs.first.data();
+        setState(() {
+          isFavorite = data['favorite'] == true;
+          notes = data['notes'] ?? '';
+        });
+      }
+
+      try {
+        final loggedSetsQuery = await FirebaseFirestore.instance
+            .collection('workouts')
+            .doc(widget.workoutId)
+            .collection('logged_sets')
+            .where('exerciseId', isEqualTo: exerciseId)
+            .orderBy('set')
+            .get();
+
+        if (loggedSetsQuery.docs.isNotEmpty) {
+          sets = loggedSetsQuery.docs.map((doc) {
+            final data = doc.data();
+            return {
+              'docId': doc.id,
+              'set': data['set'],
+              'reps': data['reps'],
+              'kg': data['weight'],
+              'rir': data['rir'],
+              'isMax': data['isMax'] ?? false,
+              'isLogged': true,
+            };
+          }).toList();
+          isWorkoutComplete = true;
+        } else {
+          _setupSets();
+        }
+      } catch (e) {
+        debugPrint('No logged sets yet: $e');
+        _setupSets();
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Connection issue. Using default sets.';
+      });
       _setupSets();
-      isWorkoutComplete = false;
+    } finally {
+      _updateTotals();
+      setState(() {
+        isLoading = false;
+      });
     }
-
-    _updateTotals();
-    setState(() {});
   }
 
   void _setupSets() {
@@ -156,6 +198,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     else if (userGoal == 'lose weight') defaultReps = 12;
 
     final int setsCount = widget.exercise['sets'] ?? 4;
+    sets.clear();
     for (int i = 1; i <= setsCount; i++) {
       sets.add({
         'set': i,
@@ -182,6 +225,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _addSet() {
+    if (widget.isViewOnly) return;
     setState(() {
       sets.add({
         'set': sets.length + 1,
@@ -242,6 +286,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _adjustRest(int seconds) {
+    if (widget.isViewOnly) return;
     setState(() {
       restDuration =
           Duration(seconds: max(15, restDuration.inSeconds + seconds));
@@ -250,6 +295,8 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _logOrComplete() async {
+    if (widget.isViewOnly) return;
+
     final currentSet =
         sets.firstWhere((s) => s['isLogged'] == false, orElse: () => sets.last);
     if (!currentSet['isLogged'] && currentSet['kg'] != null) {
@@ -260,7 +307,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
           .doc(widget.workoutId)
           .collection('logged_sets')
           .add({
-        'exerciseId': exerciseId, // ← NOW 100% CORRECT FROM exerciseIds ARRAY
+        'exerciseId': exerciseId,
         'set': currentSet['set'],
         'reps': currentSet['reps'],
         'weight': currentSet['kg'],
@@ -299,10 +346,12 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _toggleEditMode() {
+    if (widget.isViewOnly) return;
     setState(() => isWorkoutComplete = false);
   }
 
   void _toggleFavorite() async {
+    if (widget.isViewOnly) return;
     setState(() => isFavorite = !isFavorite);
     await _saveToFirestore();
   }
@@ -329,217 +378,215 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       ),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              GestureDetector(
-                onTap: () => Navigator.pushNamed(context, '/instructions'),
-                child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.network(widget.exercise['imageUrl'] ?? '',
-                        height: 220,
-                        width: double.infinity,
-                        fit: BoxFit.cover)),
-              ),
-              const SizedBox(height: 20),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                _totalBox('Total Reps', totalReps.toString()),
-                _totalBox(
-                    'Calories', '${totalCalories.toStringAsFixed(0)} kcal'),
-                _totalBox('Volume', '${totalVolume.toStringAsFixed(0)} Kg'),
-              ]),
-              const SizedBox(height: 24),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(children: const [
-                  SizedBox(
-                      width: 50,
-                      child: Center(
-                          child: Text('Set',
-                              style: TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold)))),
-                  Expanded(
-                      child: Center(
-                          child: Text('REPS',
-                              style: TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold)))),
-                  Expanded(
-                      child: Center(
-                          child: Text('KG',
-                              style: TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold)))),
-                  Expanded(
-                      child: Center(
-                          child: Text('RIR',
-                              style: TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold)))),
-                ]),
-              ),
-              const SizedBox(height: 12),
-              ...sets.asMap().entries.map((entry) {
-                int idx = entry.key;
-                var s = entry.value;
-                final bool logged = s['isLogged'] == true;
-                return Dismissible(
-                  key: UniqueKey(),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                      color: Colors.red,
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(right: 20),
-                      child: const Icon(Icons.delete, color: Colors.white)),
-                  onDismissed: (_) async {
-                    setState(() {
-                      sets.removeAt(idx);
-                      _renumberSets();
-                    });
-                    _updateTotals();
-                    final snapshot = await FirebaseFirestore.instance
-                        .collection('workouts')
-                        .doc(widget.workoutId)
-                        .collection('logged_sets')
-                        .where('set', isEqualTo: s['set'])
-                        .where('exerciseId', isEqualTo: exerciseId)
-                        .get();
-                    for (var doc in snapshot.docs) {
-                      await doc.reference.delete();
-                    }
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                        color: logged ? Colors.orange : const Color(0xFF1C1C1E),
-                        borderRadius: BorderRadius.circular(16)),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(children: [
-                      SizedBox(
-                          width: 50,
-                          child: Center(
-                              child: s['isMax'] == true
-                                  ? const Icon(Icons.emoji_events,
-                                      color: Colors.amber)
-                                  : Text('${s['set']}',
+        child: isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: Colors.orange))
+            : errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: Colors.orange, size: 64),
+                        const SizedBox(height: 16),
+                        Text(errorMessage!,
+                            style: const TextStyle(color: Colors.white70),
+                            textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              isLoading = true;
+                              errorMessage = null;
+                            });
+                            _extractAndLoadExerciseId();
+                          },
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange),
+                          child: const Text("Retry"),
+                        ),
+                      ],
+                    ),
+                  )
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        GestureDetector(
+                          onTap: () =>
+                              Navigator.pushNamed(context, '/instructions'),
+                          child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: Image.network(
+                                  widget.exercise['imageUrl'] ?? '',
+                                  height: 220,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover)),
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _totalBox('Total Reps', totalReps.toString()),
+                              _totalBox('Calories',
+                                  '${totalCalories.toStringAsFixed(0)} kcal'),
+                              _totalBox('Volume',
+                                  '${totalVolume.toStringAsFixed(0)} Kg'),
+                            ]),
+                        const SizedBox(height: 24),
+                        ...sets.map((s) {
+                          final logged = s['isLogged'] == true;
+                          return Card(
+                            color: logged
+                                ? Colors.orange.withOpacity(0.2)
+                                : const Color(0xFF1C1C1E),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: [
+                                  Text(
+                                      logged
+                                          ? 'Set ${s['set']}'
+                                          : 'Set ${s['set']}',
                                       style: TextStyle(
                                           color: logged
-                                              ? Colors.white
+                                              ? Colors.orange
                                               : Colors.white,
-                                          fontWeight: FontWeight.bold)))),
-                      _numberInput(
-                          (val) => setState(
-                              () => s['reps'] = double.tryParse(val) ?? 0),
-                          s['reps']?.toInt().toString() ?? '',
-                          logged),
-                      _numberInput(
-                          (val) => setState(
-                              () => s['kg'] = double.tryParse(val) ?? 0),
-                          s['kg']?.toString().replaceAll('.0', '') ?? '',
-                          logged),
-                      _numberInput(
-                          (val) => setState(
-                              () => s['rir'] = double.tryParse(val) ?? 0),
-                          s['rir']?.toInt().toString() ?? '',
-                          logged),
-                    ]),
-                  ),
-                );
-              }).toList(),
-              const SizedBox(height: 20),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                GestureDetector(
-                    onTap: _addSet,
-                    child: const Text('+ Add Set',
-                        style: TextStyle(
-                            color: Colors.orange,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold))),
-                Row(children: [
-                  const Text('Rest: ', style: TextStyle(color: Colors.white)),
-                  Text(
-                      isResting
-                          ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
-                          : '${defaultRestDuration.inMinutes}:00',
-                      style: const TextStyle(
-                          color: Colors.orange,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18)),
-                  IconButton(
-                      icon: const Icon(Icons.remove_circle_outline,
-                          color: Colors.orange),
-                      onPressed: () => _adjustRest(-15)),
-                  const Text('15s', style: TextStyle(color: Colors.orange)),
-                  IconButton(
-                      icon: const Icon(Icons.add_circle_outline,
-                          color: Colors.orange),
-                      onPressed: () => _adjustRest(15)),
-                ]),
-              ]),
-              const SizedBox(height: 20),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                Row(children: [
-                  const Icon(Icons.emoji_events, color: Colors.amber),
-                  Text(' 1RM: ${oneRepMax.toStringAsFixed(0)} kg',
-                      style: const TextStyle(color: Colors.white))
-                ]),
-                Row(children: [
-                  const Icon(Icons.emoji_events_outlined, color: Colors.orange),
-                  Text(' Max: ${maxWeight.toStringAsFixed(1)} kg',
-                      style: const TextStyle(color: Colors.white))
-                ]),
-              ]),
-              const SizedBox(height: 24),
-              if (!isWorkoutComplete)
-                ElevatedButton(
-                  onPressed: _logOrComplete,
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      minimumSize: const Size(double.infinity, 56),
-                      shape: const StadiumBorder()),
-                  child: Text(
-                      sets.any((s) => s['isLogged'] != true)
-                          ? 'Log Set'
-                          : 'Complete Set',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
-              if (isWorkoutComplete)
-                GestureDetector(
-                  onTap: _toggleEditMode,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(16)),
-                    child: const Center(
-                      child: Text('Workout Complete! Tap here to edit',
-                          style: TextStyle(
-                              color: Colors.green,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold)),
+                                          fontWeight: FontWeight.bold)),
+                                  const SizedBox(width: 12),
+                                  _numberInput(
+                                      (val) => setState(() => s['reps'] =
+                                          double.tryParse(val) ?? 0),
+                                      s['reps']?.toInt().toString() ?? '',
+                                      logged),
+                                  _numberInput(
+                                      (val) => setState(() =>
+                                          s['kg'] = double.tryParse(val) ?? 0),
+                                      s['kg']
+                                              ?.toString()
+                                              .replaceAll('.0', '') ??
+                                          '',
+                                      logged),
+                                  _numberInput(
+                                      (val) => setState(() =>
+                                          s['rir'] = double.tryParse(val) ?? 0),
+                                      s['rir']?.toInt().toString() ?? '',
+                                      logged),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        const SizedBox(height: 20),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              if (!widget.isViewOnly)
+                                GestureDetector(
+                                    onTap: _addSet,
+                                    child: const Text('+ Add Set',
+                                        style: TextStyle(
+                                            color: Colors.orange,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold))),
+                              Row(children: [
+                                const Text('Rest: ',
+                                    style: TextStyle(color: Colors.white)),
+                                Text(
+                                    isResting
+                                        ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
+                                        : '${defaultRestDuration.inMinutes}:00',
+                                    style: const TextStyle(
+                                        color: Colors.orange,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 18)),
+                                if (!widget.isViewOnly) ...[
+                                  IconButton(
+                                      icon: const Icon(
+                                          Icons.remove_circle_outline,
+                                          color: Colors.orange),
+                                      onPressed: () => _adjustRest(-15)),
+                                  const Text('15s',
+                                      style: TextStyle(color: Colors.orange)),
+                                  IconButton(
+                                      icon: const Icon(Icons.add_circle_outline,
+                                          color: Colors.orange),
+                                      onPressed: () => _adjustRest(15)),
+                                ],
+                              ]),
+                            ]),
+                        const SizedBox(height: 20),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              Row(children: [
+                                const Icon(Icons.emoji_events,
+                                    color: Colors.amber),
+                                Text(' 1RM: ${oneRepMax.toStringAsFixed(0)} kg',
+                                    style: const TextStyle(color: Colors.white))
+                              ]),
+                              Row(children: [
+                                const Icon(Icons.emoji_events_outlined,
+                                    color: Colors.orange),
+                                Text(' Max: ${maxWeight.toStringAsFixed(1)} kg',
+                                    style: const TextStyle(color: Colors.white))
+                              ]),
+                            ]),
+                        const SizedBox(height: 24),
+                        if (!isWorkoutComplete && !widget.isViewOnly)
+                          ElevatedButton(
+                            onPressed: _logOrComplete,
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                minimumSize: const Size(double.infinity, 56),
+                                shape: const StadiumBorder()),
+                            child: Text(
+                                sets.any((s) => s['isLogged'] != true)
+                                    ? 'Log Set'
+                                    : 'Complete Set',
+                                style: const TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.bold)),
+                          ),
+                        if (isWorkoutComplete)
+                          GestureDetector(
+                            onTap: widget.isViewOnly ? null : _toggleEditMode,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 20),
+                              decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(16)),
+                              child: Center(
+                                child: Text(
+                                    widget.isViewOnly
+                                        ? 'Workout Completed - View Only'
+                                        : 'Workout Complete! Tap here to edit',
+                                    style: const TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          decoration: InputDecoration(
+                              hintText: 'Add notes here',
+                              hintStyle: const TextStyle(color: Colors.white38),
+                              filled: true,
+                              fillColor: const Color(0xFF1C1C1E),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  borderSide: BorderSide.none)),
+                          style: const TextStyle(color: Colors.white),
+                          onChanged:
+                              widget.isViewOnly ? null : (val) => notes = val,
+                        ),
+                        const SizedBox(height: 80),
+                      ],
                     ),
                   ),
-                ),
-              const SizedBox(height: 20),
-              TextField(
-                decoration: InputDecoration(
-                    hintText: 'Add notes here',
-                    hintStyle: const TextStyle(color: Colors.white38),
-                    filled: true,
-                    fillColor: const Color(0xFF1C1C1E),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none)),
-                style: const TextStyle(color: Colors.white),
-                onChanged: (val) => notes = val,
-              ),
-              const SizedBox(height: 80),
-            ],
-          ),
-        ),
       ),
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: const Color(0xFF1C1C1E),
@@ -553,7 +600,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
               icon: Icon(Icons.bar_chart), label: 'Statistics'),
         ],
         onTap: (i) {
-          if (i == 0) {
+          if (i == 0 && !widget.isViewOnly) {
             showDialog(
               context: context,
               builder: (_) => AlertDialog(
@@ -622,7 +669,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         margin: const EdgeInsets.symmetric(horizontal: 6),
         child: TextFormField(
           initialValue: initialValue,
-          enabled: !logged,
+          enabled: !logged && !widget.isViewOnly,
           keyboardType: TextInputType.numberWithOptions(decimal: true),
           textAlign: TextAlign.center,
           style: TextStyle(
