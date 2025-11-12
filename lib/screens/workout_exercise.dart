@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
+import 'instructions_screen.dart'; // ADD THIS LINE
 
 class WorkoutExerciseScreen extends StatefulWidget {
   final Map<String, dynamic> exercise;
@@ -842,7 +843,15 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
               ),
             );
           }
-          if (i == 1) Navigator.pushNamed(context, '/instructions');
+          if (i == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) =>
+                    InstructionsScreen(exercise: widget.exercise),
+              ),
+            );
+          }
         },
       ),
     );

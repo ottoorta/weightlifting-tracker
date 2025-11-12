@@ -15,6 +15,7 @@ dependencies:
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.2
 
   # SOCIAL LOGINS THAT PLAY NICE
   google_sign_in: ^6.2.1
@@ -24,6 +25,11 @@ dependencies:
   intl: ^0.19.0
 
   audioplayers: ^5.2.1  # For victory audio
+
+  share_plus: ^7.2.2
+  video_player: ^2.8.1
+  image_picker: ^1.0.7
+  chewie: ^1.7.1  # Optional but gives perfect controls
 
 dev_dependencies:
   flutter_test:

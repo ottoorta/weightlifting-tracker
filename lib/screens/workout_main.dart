@@ -296,13 +296,12 @@ https://ironcoach.app
 
   // === NAVIGATE TO ADD EXERCISES ===
   Future<void> _addExercises() async {
-    final result = await Navigator.push(
+    final result = await Navigator.pushNamed(
       context,
-      MaterialPageRoute(
-        builder: (context) =>
-            AddExercisesScreen(workoutId: widget.workout['id']),
-      ),
+      '/add_exercises',
+      arguments: widget.workout['id'],
     );
+
     if (result == true) {
       await _loadExercises();
       await _calculateTotals();
