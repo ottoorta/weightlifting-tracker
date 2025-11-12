@@ -15,7 +15,9 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
   List<Map<String, dynamic>> filteredExercises = [];
   Set<String> selectedIds = {};
   String searchQuery = '';
-  String filterType = 'all';
+
+  // Cache equipment names to avoid repeated queries
+  final Map<String, String> _equipmentNameCache = {};
 
   @override
   void initState() {
@@ -26,13 +28,41 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
   Future<void> _loadExercises() async {
     final snapshot =
         await FirebaseFirestore.instance.collection('exercises').get();
-    final exercises = snapshot.docs.map((doc) {
+
+    final List<Map<String, dynamic>> exercises = [];
+
+    for (var doc in snapshot.docs) {
       final data = doc.data();
-      return {
+      final equipmentIds = data['equipment'] as List<dynamic>? ?? [];
+
+      // Fetch equipment names
+      String equipmentText = "None";
+      if (equipmentIds.isNotEmpty) {
+        List<String> names = [];
+        for (String id in equipmentIds) {
+          if (_equipmentNameCache.containsKey(id)) {
+            names.add(_equipmentNameCache[id]!);
+          } else {
+            final eqDoc = await FirebaseFirestore.instance
+                .collection('equipment')
+                .doc(id)
+                .get();
+            final name = eqDoc.exists
+                ? (eqDoc['name'] as String? ?? 'Unknown')
+                : 'Unknown';
+            _equipmentNameCache[id] = name;
+            names.add(name);
+          }
+        }
+        equipmentText = names.join(', ');
+      }
+
+      exercises.add({
         'id': doc.id,
         ...data,
-      };
-    }).toList();
+        '_equipmentText': equipmentText, // Pre-formatted for display
+      });
+    }
 
     setState(() {
       allExercises = exercises;
@@ -44,28 +74,15 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
     List<Map<String, dynamic>> filtered = allExercises;
 
     if (searchQuery.isNotEmpty) {
-      filtered = filtered
-          .where((ex) =>
-              (ex['name'] as String?)
-                  ?.toLowerCase()
-                  .contains(searchQuery.toLowerCase()) ==
-              true)
-          .toList();
+      filtered = filtered.where((ex) {
+        final name = (ex['name'] as String?)?.toLowerCase() ?? '';
+        return name.contains(searchQuery.toLowerCase());
+      }).toList();
     }
 
     setState(() {
       filteredExercises = filtered;
     });
-  }
-
-  // Helper to format equipment array
-  String _formatEquipment(dynamic equipmentData) {
-    if (equipmentData == null) return "None";
-    if (equipmentData is List && equipmentData.isEmpty) return "None";
-    if (equipmentData is List) {
-      return equipmentData.map((e) => e.toString()).join(', ');
-    }
-    return equipmentData.toString();
   }
 
   @override
@@ -120,7 +137,7 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                     itemBuilder: (context, index) {
                       final ex = filteredExercises[index];
                       final isSelected = selectedIds.contains(ex['id']);
-                      final equipmentText = _formatEquipment(ex['equipment']);
+                      final equipmentText = ex['_equipmentText'] ?? 'None';
 
                       return GestureDetector(
                         onTap: () {
