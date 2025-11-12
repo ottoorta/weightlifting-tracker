@@ -16,26 +16,38 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
   Set<String> selectedIds = {};
   String searchQuery = '';
 
-  // Cache equipment names to avoid repeated queries
+  // FILTERS
+  String? selectedMuscle;
+  String? selectedEquipment;
+  List<String> muscleList = [];
+  List<String> equipmentList = [];
+
+  // Cache
   final Map<String, String> _equipmentNameCache = {};
 
   @override
   void initState() {
     super.initState();
-    _loadExercises();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    await Future.wait([
+      _loadExercises(),
+      _loadMuscles(),
+      _loadEquipmentList(),
+    ]);
   }
 
   Future<void> _loadExercises() async {
     final snapshot =
         await FirebaseFirestore.instance.collection('exercises').get();
-
     final List<Map<String, dynamic>> exercises = [];
 
     for (var doc in snapshot.docs) {
       final data = doc.data();
       final equipmentIds = data['equipment'] as List<dynamic>? ?? [];
 
-      // Fetch equipment names
       String equipmentText = "None";
       if (equipmentIds.isNotEmpty) {
         List<String> names = [];
@@ -47,9 +59,8 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                 .collection('equipment')
                 .doc(id)
                 .get();
-            final name = eqDoc.exists
-                ? (eqDoc['name'] as String? ?? 'Unknown')
-                : 'Unknown';
+            final name =
+                eqDoc.exists ? (eqDoc['name'] ?? 'Unknown') : 'Unknown';
             _equipmentNameCache[id] = name;
             names.add(name);
           }
@@ -60,7 +71,7 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
       exercises.add({
         'id': doc.id,
         ...data,
-        '_equipmentText': equipmentText, // Pre-formatted for display
+        '_equipmentText': equipmentText,
       });
     }
 
@@ -70,9 +81,38 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
     });
   }
 
-  void _filterExercises() {
+  Future<void> _loadMuscles() async {
+    final snap = await FirebaseFirestore.instance.collection('muscles').get();
+    final List<String> names =
+        snap.docs.map((doc) => doc['name'] as String).toList();
+    setState(() {
+      muscleList = ['All', ...names]..sort((a, b) => a == 'All'
+          ? -1
+          : b == 'All'
+              ? 1
+              : a.compareTo(b));
+    });
+  }
+
+  Future<void> _loadEquipmentList() async {
+    final snap = await FirebaseFirestore.instance.collection('equipment').get();
+    final List<String> names =
+        snap.docs.map((doc) => doc['name'] as String).toList();
+    setState(() {
+      equipmentList = ['All', 'None', ...names]..sort((a, b) {
+          if (a == 'All') return -1;
+          if (b == 'All') return 1;
+          if (a == 'None') return -1;
+          if (b == 'None') return 1;
+          return a.compareTo(b);
+        });
+    });
+  }
+
+  void _applyFilters() {
     List<Map<String, dynamic>> filtered = allExercises;
 
+    // Search
     if (searchQuery.isNotEmpty) {
       filtered = filtered.where((ex) {
         final name = (ex['name'] as String?)?.toLowerCase() ?? '';
@@ -80,9 +120,49 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
       }).toList();
     }
 
+    // Muscle Filter
+    if (selectedMuscle != null && selectedMuscle != 'All') {
+      filtered = filtered.where((ex) {
+        final muscles = ex['muscles'] as List<dynamic>? ?? [];
+        return muscles.contains(selectedMuscle);
+      }).toList();
+
+      filtered.sort((a, b) {
+        final aMuscles = a['muscles'] as List<dynamic>? ?? [];
+        final bMuscles = b['muscles'] as List<dynamic>? ?? [];
+        final aIndex = aMuscles.indexOf(selectedMuscle);
+        final bIndex = bMuscles.indexOf(selectedMuscle);
+        if (aIndex == 0) return -1;
+        if (bIndex == 0) return 1;
+        return aIndex.compareTo(bIndex);
+      });
+    }
+
+    // Equipment Filter
+    if (selectedEquipment != null && selectedEquipment != 'All') {
+      if (selectedEquipment == 'None') {
+        filtered = filtered.where((ex) {
+          final ids = ex['equipment'] as List<dynamic>? ?? [];
+          return ids.isEmpty;
+        }).toList();
+      } else {
+        filtered = filtered.where((ex) {
+          final ids = ex['equipment'] as List<dynamic>? ?? [];
+          return ids.any((id) => _equipmentNameCache[id] == selectedEquipment);
+        }).toList();
+      }
+    }
+
+    setState(() => filteredExercises = filtered);
+  }
+
+  void _clearFilters() {
     setState(() {
-      filteredExercises = filtered;
+      selectedMuscle = 'All';
+      selectedEquipment = 'All';
+      searchQuery = '';
     });
+    _applyFilters();
   }
 
   @override
@@ -97,31 +177,109 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
         ),
         title: const Text("Add exercises",
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        actions: [
+          if (selectedMuscle != 'All' ||
+              selectedEquipment != 'All' ||
+              searchQuery.isNotEmpty)
+            TextButton(
+              onPressed: _clearFilters,
+              child: const Text("Clear Filters",
+                  style: TextStyle(color: Colors.orange)),
+            ),
+        ],
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: TextField(
-                    onChanged: (val) {
-                      searchQuery = val;
-                      _filterExercises();
-                    },
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: "Search",
-                      hintStyle: const TextStyle(color: Colors.white38),
-                      filled: true,
-                      fillColor: const Color(0xFF1C1C1E),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none),
-                      prefixIcon:
-                          const Icon(Icons.search, color: Colors.white38),
-                    ),
+                TextField(
+                  onChanged: (val) {
+                    searchQuery = val;
+                    _applyFilters();
+                  },
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: "Search exercises...",
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: const Color(0xFF1C1C1E),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white38),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 170,
+                        child: DropdownButtonFormField<String>(
+                          value: selectedMuscle,
+                          hint: const Text("Muscle",
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 14)),
+                          dropdownColor: const Color(0xFF1C1C1E),
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: const Color(0xFF1C1C1E),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                          items: muscleList
+                              .map((m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Text(m,
+                                      style: const TextStyle(
+                                          color: Colors.white))))
+                              .toList(),
+                          onChanged: (val) {
+                            setState(() => selectedMuscle = val);
+                            _applyFilters();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 170,
+                        child: DropdownButtonFormField<String>(
+                          value: selectedEquipment,
+                          hint: const Text("Equipment",
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 14)),
+                          dropdownColor: const Color(0xFF1C1C1E),
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: const Color(0xFF1C1C1E),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                          items: equipmentList
+                              .map((e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(e,
+                                      style: const TextStyle(
+                                          color: Colors.white))))
+                              .toList(),
+                          onChanged: (val) {
+                            setState(() => selectedEquipment = val);
+                            _applyFilters();
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
