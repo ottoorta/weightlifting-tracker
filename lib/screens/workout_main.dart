@@ -4,7 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:share_plus/share_plus.dart';
 import 'workout_exercise.dart';
+import 'add_exercises.dart';
 
 class WorkoutMainScreen extends StatefulWidget {
   final Map<String, dynamic> workout;
@@ -26,21 +28,75 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   Duration elapsedDuration = Duration.zero;
   int calories = 0;
   double volume = 0.0;
-  late Timer _timer;
+  Timer? _timer;
   final DateFormat dateFormat = DateFormat('EEEE, MMMM d');
+
+  late List<Map<String, dynamic>> currentExercises;
+  bool isPublic = false;
 
   @override
   void initState() {
     super.initState();
+    currentExercises = widget.exercises;
     _checkWorkoutStatus();
+    _loadPublicStatus();
   }
 
   @override
   void dispose() {
-    _timer.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
+  // === LOAD PUBLIC STATUS ===
+  Future<void> _loadPublicStatus() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .get();
+
+    if (doc.exists && doc.data()!.containsKey('public')) {
+      setState(() => isPublic = doc['public'] == true);
+    }
+  }
+
+  // === TOGGLE PUBLIC ===
+  Future<void> _togglePublic(bool value) async {
+    setState(() => isPublic = value);
+    await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .set({'public': value}, SetOptions(merge: true));
+  }
+
+  // === SHARE WORKOUT ===
+  void _shareWorkout() {
+    final dateStr = widget.workout['date'] != null
+        ? dateFormat.format(DateTime.parse(widget.workout['date']))
+        : 'Today';
+
+    final exerciseNames =
+        currentExercises.map((e) => e['name'] ?? 'Exercise').join(', ');
+
+    final shareText = """
+IRON COACH Workout
+
+$dateStr
+${currentExercises.length} Exercises
+Volume: ${volume.toStringAsFixed(0)} kg | Calories: $calories kcal
+
+Exercises:
+$exerciseNames
+
+Download Iron Coach and crush your goals!
+https://ironcoach.app
+    """
+        .trim();
+
+    Share.share(shareText, subject: 'My Iron Coach Workout - $dateStr');
+  }
+
+  // === CHECK WORKOUT STATUS ===
   Future<void> _checkWorkoutStatus() async {
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
@@ -75,7 +131,24 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     }
   }
 
+  // === TIMER (FIXED – NO DOUBLE TICK) ===
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        elapsedDuration = elapsedDuration + const Duration(seconds: 1);
+      });
+    });
+  }
+
+  // === GET EXERCISE ID ===
   Future<String> _getExerciseId(Map<String, dynamic> ex) async {
+    if (ex['id'] != null && ex['id'] != 'unknown') return ex['id'];
+
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -100,6 +173,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     return 'unknown';
   }
 
+  // === GET LOGGED SETS COUNT ===
   Future<int> _getLoggedSetsCount(String exerciseId) async {
     final snapshot = await FirebaseFirestore.instance
         .collection('workouts')
@@ -110,11 +184,12 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     return snapshot.docs.length;
   }
 
+  // === CALCULATE TOTALS ===
   Future<void> _calculateTotals() async {
     int totalCal = 0;
     double totalVol = 0.0;
 
-    for (var ex in widget.exercises) {
+    for (var ex in currentExercises) {
       final exerciseId = await _getExerciseId(ex);
       final snapshot = await FirebaseFirestore.instance
           .collection('workouts')
@@ -138,6 +213,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     });
   }
 
+  // === START WORKOUT ===
   void _startWorkout() async {
     setState(() => isWorkoutStarted = true);
 
@@ -151,10 +227,10 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     await _calculateTotals();
   }
 
+  // === FINISH WORKOUT ===
   Future<void> _finishWorkout() async {
     final now = FieldValue.serverTimestamp();
 
-    // 1. Mark as completed
     await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -163,7 +239,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
       'completedAt': now,
     }, SetOptions(merge: true));
 
-    // 2. Clean up empty exercises
+    // Clean up empty exercises
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -172,39 +248,65 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     final List<dynamic> exerciseIds = List.from(data['exerciseIds'] ?? []);
 
     final List<String> idsToRemove = [];
-
     for (String exId in exerciseIds) {
-      final loggedCount = await _getLoggedSetsCount(exId);
-      if (loggedCount == 0) {
-        idsToRemove.add(exId);
-      }
+      final count = await _getLoggedSetsCount(exId);
+      if (count == 0) idsToRemove.add(exId);
     }
-
     if (idsToRemove.isNotEmpty) {
       await FirebaseFirestore.instance
           .collection('workouts')
           .doc(widget.workout['id'])
-          .update({
-        'exerciseIds': FieldValue.arrayRemove(idsToRemove),
-      });
+          .update({'exerciseIds': FieldValue.arrayRemove(idsToRemove)});
     }
 
-    setState(() {
-      isWorkoutCompleted = true;
-    });
-    _timer.cancel();
+    setState(() => isWorkoutCompleted = true);
+    _timer?.cancel();
   }
 
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
+  // === LOAD EXERCISES AFTER ADDING ===
+  Future<void> _loadExercises() async {
+    final workoutDoc = await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .get();
+
+    if (!workoutDoc.exists) return;
+
+    final List<dynamic> exerciseIds = workoutDoc.data()!['exerciseIds'] ?? [];
+    final List<Map<String, dynamic>> loaded = [];
+
+    for (String id in exerciseIds) {
+      final exDoc = await FirebaseFirestore.instance
+          .collection('exercises')
+          .doc(id)
+          .get();
+      if (exDoc.exists) {
+        loaded.add({
+          'id': id,
+          ...exDoc.data()!,
+          'sets': 4,
+          'reps': '10-12',
+          'weight': '20',
+        });
       }
-      setState(() {
-        elapsedDuration = elapsedDuration + const Duration(seconds: 1);
-      });
-    });
+    }
+
+    setState(() => currentExercises = loaded);
+  }
+
+  // === NAVIGATE TO ADD EXERCISES ===
+  Future<void> _addExercises() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            AddExercisesScreen(workoutId: widget.workout['id']),
+      ),
+    );
+    if (result == true) {
+      await _loadExercises();
+      await _calculateTotals();
+    }
   }
 
   String _formatDuration(Duration d) {
@@ -256,11 +358,11 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
       body: Stack(
         children: [
           SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ... your existing UI (coach card, muscles, stats, exercises)
+                // Coach Card
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -279,12 +381,40 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                       ]),
                       SizedBox(height: 8),
                       Text(
-                          "Today’s Workout Details: We will focus on maximizing effort on Triceps, Quads and Calves since they are showing weakness...",
-                          style: TextStyle(color: Colors.white70)),
+                        "Today’s Workout Details: We will focus on maximizing effort on Triceps, Quads and Calves since they are showing weakness...",
+                        style: TextStyle(color: Colors.white70),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // Exercises Count + Add
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text("${currentExercises.length} Exercises",
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                    if (!isWorkoutCompleted)
+                      GestureDetector(
+                        onTap: _addExercises,
+                        child: Row(
+                          children: const [
+                            Text("Add Exercises",
+                                style: TextStyle(color: Colors.orange)),
+                            SizedBox(width: 4),
+                            Icon(Icons.add, color: Colors.orange),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Target Muscles
                 const Text("Target Muscles",
                     style: TextStyle(
                         color: Colors.white,
@@ -306,6 +436,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // Stats
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -315,12 +447,51 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                ...widget.exercises.map((ex) => _exerciseCard(ex)).toList(),
+
+                // Exercise Cards
+                ...currentExercises.map((ex) => _exerciseCard(ex)).toList(),
+
                 const SizedBox(height: 32),
+
+                // Share Workout
+                GestureDetector(
+                  onTap: _shareWorkout,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.share, color: Colors.orange, size: 28),
+                      SizedBox(width: 8),
+                      Text("Share this workout",
+                          style: TextStyle(color: Colors.orange, fontSize: 16)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Make Public Checkbox
+                Row(
+                  children: [
+                    Checkbox(
+                      value: isPublic,
+                      activeColor: Colors.orange,
+                      onChanged: isWorkoutCompleted
+                          ? null
+                          : (val) => _togglePublic(val ?? false),
+                    ),
+                    const Text("Make Public",
+                        style: TextStyle(color: Colors.white)),
+                    const SizedBox(width: 8),
+                    const Text("(Visible to community)",
+                        style: TextStyle(color: Colors.white60, fontSize: 12)),
+                  ],
+                ),
+
+                const SizedBox(height: 40),
               ],
             ),
           ),
-          // BUTTON ALWAYS VISIBLE
+
+          // Bottom Button
           Positioned(
             bottom: 52,
             left: 16,
@@ -363,9 +534,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     return FutureBuilder<String>(
       future: _getExerciseId(ex),
       builder: (context, idSnapshot) {
-        if (!idSnapshot.hasData) {
-          return const SizedBox.shrink(); // Or loading placeholder
-        }
+        if (!idSnapshot.hasData) return const SizedBox.shrink();
         final exerciseId = idSnapshot.data!;
         return FutureBuilder<int>(
           future: _getLoggedSetsCount(exerciseId),
@@ -440,24 +609,20 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
                                 fontSize: 14),
                           ),
                           if (isComplete)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                "$totalSets sets completed",
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12),
-                              ),
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text("All sets completed",
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12)),
                             ),
                           if (!isComplete && hasProgress)
                             Padding(
                               padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                "$loggedCount/$totalSets sets logged",
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 12),
-                              ),
+                              child: Text("$loggedCount/$totalSets sets logged",
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
                             ),
                         ],
                       ),
@@ -477,7 +642,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   }
 }
 
-// MuscleTargetChip — unchanged
+// MuscleTargetChip (unchanged)
 class MuscleTargetChip extends StatelessWidget {
   final String name;
   final int percent;
