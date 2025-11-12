@@ -1,6 +1,8 @@
 // lib/screens/add_exercises.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'add_custom_exercise.dart';
 
 class AddExercisesScreen extends StatefulWidget {
   final String workoutId;
@@ -17,12 +19,12 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
   String searchQuery = '';
 
   // FILTERS
-  String? selectedMuscle;
-  String? selectedEquipment;
+  String? selectedMuscle = 'All';
+  String? selectedEquipment = 'All';
   List<String> muscleList = [];
   List<String> equipmentList = [];
 
-  // Cache
+  final user = FirebaseAuth.instance.currentUser;
   final Map<String, String> _equipmentNameCache = {};
 
   @override
@@ -32,18 +34,24 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
   }
 
   Future<void> _loadData() async {
+    setState(() {
+      allExercises.clear();
+      filteredExercises.clear();
+    });
+
     await Future.wait([
-      _loadExercises(),
+      _loadOfficialExercises(),
+      _loadCustomExercises(),
       _loadMuscles(),
       _loadEquipmentList(),
     ]);
+
+    _applyFilters(); // Show all on load
   }
 
-  Future<void> _loadExercises() async {
+  Future<void> _loadOfficialExercises() async {
     final snapshot =
         await FirebaseFirestore.instance.collection('exercises').get();
-    final List<Map<String, dynamic>> exercises = [];
-
     for (var doc in snapshot.docs) {
       final data = doc.data();
       final equipmentIds = data['equipment'] as List<dynamic>? ?? [];
@@ -68,23 +76,40 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
         equipmentText = names.join(', ');
       }
 
-      exercises.add({
+      allExercises.add({
         'id': doc.id,
+        'isCustom': false,
         ...data,
         '_equipmentText': equipmentText,
       });
     }
+  }
 
-    setState(() {
-      allExercises = exercises;
-      filteredExercises = exercises;
-    });
+  Future<void> _loadCustomExercises() async {
+    if (user == null) return;
+    final snapshot = await FirebaseFirestore.instance
+        .collection('exercises_custom')
+        .where('userId', isEqualTo: user!.uid)
+        .where('isPublic', isEqualTo: false)
+        .get();
+
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      final equipment = data['equipment'] as List<dynamic>? ?? [];
+      String equipmentText = equipment.isEmpty ? "None" : equipment.join(', ');
+
+      allExercises.add({
+        'id': doc.id,
+        'isCustom': true,
+        ...data,
+        '_equipmentText': equipmentText,
+      });
+    }
   }
 
   Future<void> _loadMuscles() async {
     final snap = await FirebaseFirestore.instance.collection('muscles').get();
-    final List<String> names =
-        snap.docs.map((doc) => doc['name'] as String).toList();
+    final names = snap.docs.map((doc) => doc['name'] as String).toList();
     setState(() {
       muscleList = ['All', ...names]..sort((a, b) => a == 'All'
           ? -1
@@ -96,8 +121,7 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
 
   Future<void> _loadEquipmentList() async {
     final snap = await FirebaseFirestore.instance.collection('equipment').get();
-    final List<String> names =
-        snap.docs.map((doc) => doc['name'] as String).toList();
+    final names = snap.docs.map((doc) => doc['name'] as String).toList();
     setState(() {
       equipmentList = ['All', 'None', ...names]..sort((a, b) {
           if (a == 'All') return -1;
@@ -112,7 +136,6 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
   void _applyFilters() {
     List<Map<String, dynamic>> filtered = allExercises;
 
-    // Search
     if (searchQuery.isNotEmpty) {
       filtered = filtered.where((ex) {
         final name = (ex['name'] as String?)?.toLowerCase() ?? '';
@@ -120,7 +143,6 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
       }).toList();
     }
 
-    // Muscle Filter
     if (selectedMuscle != null && selectedMuscle != 'All') {
       filtered = filtered.where((ex) {
         final muscles = ex['muscles'] as List<dynamic>? ?? [];
@@ -138,7 +160,6 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
       });
     }
 
-    // Equipment Filter
     if (selectedEquipment != null && selectedEquipment != 'All') {
       if (selectedEquipment == 'None') {
         filtered = filtered.where((ex) {
@@ -182,10 +203,9 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
               selectedEquipment != 'All' ||
               searchQuery.isNotEmpty)
             TextButton(
-              onPressed: _clearFilters,
-              child: const Text("Clear Filters",
-                  style: TextStyle(color: Colors.orange)),
-            ),
+                onPressed: _clearFilters,
+                child: const Text("Clear",
+                    style: TextStyle(color: Colors.orange))),
         ],
       ),
       body: Column(
@@ -282,6 +302,34 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () async {
+                    final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const AddCustomExerciseScreen()));
+                    if (result == true) {
+                      setState(() {
+                        allExercises.clear();
+                        filteredExercises.clear();
+                      });
+                      _loadData();
+                    }
+                  },
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_circle_outline, color: Colors.orange),
+                      SizedBox(width: 8),
+                      Text("Add Custom Exercise",
+                          style: TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -296,6 +344,7 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                       final ex = filteredExercises[index];
                       final isSelected = selectedIds.contains(ex['id']);
                       final equipmentText = ex['_equipmentText'] ?? 'None';
+                      final isCustom = ex['isCustom'] == true;
 
                       return GestureDetector(
                         onTap: () {
@@ -316,6 +365,9 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                                 ? Colors.orange.withOpacity(0.3)
                                 : const Color(0xFF1C1C1E),
                             borderRadius: BorderRadius.circular(16),
+                            border: isCustom
+                                ? Border.all(color: Colors.orange, width: 1)
+                                : null,
                           ),
                           child: Row(
                             children: [
@@ -340,12 +392,21 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      ex['name'] ?? 'Unknown Exercise',
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          ex['name'] ?? 'Unknown',
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16),
+                                        ),
+                                        if (isCustom) ...[
+                                          const SizedBox(width: 8),
+                                          const Icon(Icons.star,
+                                              color: Colors.orange, size: 16),
+                                        ],
+                                      ],
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
