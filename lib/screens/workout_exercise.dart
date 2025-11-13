@@ -6,18 +6,20 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
-import 'instructions_screen.dart'; // ADD THIS LINE
+import 'instructions_screen.dart';
 
 class WorkoutExerciseScreen extends StatefulWidget {
-  final Map<String, dynamic> exercise;
   final String workoutId;
-  final bool isViewOnly;
+  final Map<String, dynamic> exercise;
+  final bool isWorkoutStarted;
+  final bool isViewOnly; // ← REQUIRED: used throughout the screen
 
   const WorkoutExerciseScreen({
     super.key,
-    required this.exercise,
     required this.workoutId,
-    this.isViewOnly = false,
+    required this.exercise,
+    required this.isWorkoutStarted,
+    this.isViewOnly = false, // default false for normal use
   });
 
   @override
@@ -55,6 +57,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   VideoPlayerController? _videoController;
   ChewieController? _chewieController;
   bool _hasVideo = false;
+  bool _videoError = false;
   late PageController _pageController;
   int _currentPage = 0;
 
@@ -64,13 +67,22 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   @override
   void initState() {
     super.initState();
+
     _pageController = PageController();
     _pageController.addListener(() {
-      setState(() {
-        _currentPage = _pageController.page?.round() ?? 0;
-      });
+      if (mounted) {
+        setState(() {
+          _currentPage = _pageController.page?.round() ?? 0;
+        });
+      }
     });
+
     _extractAndLoadExerciseId();
+
+    // Disable logging if workout not started
+    if (!widget.isWorkoutStarted) {
+      _showLogButton = false;
+    }
   }
 
   @override
@@ -85,7 +97,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _addSet() {
-    if (widget.isViewOnly) return;
+    if (widget.isViewOnly || !widget.isWorkoutStarted) return;
     setState(() {
       sets.add({
         'set': sets.length + 1,
@@ -130,8 +142,19 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
           widget.exercise['name']?.toString().toLowerCase() ?? '';
 
       for (String id in exerciseIds) {
-        final doc = await FirebaseFirestore.instance
+        var doc = await FirebaseFirestore.instance
             .collection('exercises')
+            .doc(id)
+            .get();
+        if (doc.exists &&
+            doc['name']?.toString().toLowerCase() == exerciseName) {
+          exerciseId = id;
+          await _loadUserSettingsAndData();
+          return;
+        }
+
+        doc = await FirebaseFirestore.instance
+            .collection('exercises_custom')
             .doc(id)
             .get();
         if (doc.exists &&
@@ -200,33 +223,22 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         });
       }
 
-      // VIDEO CHECK + MUTED
-      final exDoc = await FirebaseFirestore.instance
+      var exDoc = await FirebaseFirestore.instance
           .collection('exercises')
           .doc(exerciseId)
           .get();
 
+      if (!exDoc.exists) {
+        exDoc = await FirebaseFirestore.instance
+            .collection('exercises_custom')
+            .doc(exerciseId)
+            .get();
+      }
+
       if (exDoc.exists) {
         final videoUrl = exDoc['videoUrl'] as String?;
-        if (videoUrl != null && videoUrl.isNotEmpty) {
-          _hasVideo = true;
-          _videoController = VideoPlayerController.network(videoUrl);
-          await _videoController!.initialize();
-          _videoController!.setVolume(0); // MUTED
-
-          _chewieController = ChewieController(
-            videoPlayerController: _videoController!,
-            autoPlay: false,
-            looping: true,
-            allowMuting: true,
-            showControls: true,
-            materialProgressColors: ChewieProgressColors(
-              playedColor: Colors.orange,
-              handleColor: Colors.orange,
-              backgroundColor: Colors.grey,
-              bufferedColor: Colors.white30,
-            ),
-          );
+        if (videoUrl != null && videoUrl.trim().isNotEmpty) {
+          await _initializeVideoSafely(videoUrl.trim());
         }
       }
 
@@ -264,6 +276,55 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       _updateTotals();
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  Future<void> _initializeVideoSafely(String url) async {
+    _hasVideo = true;
+    _videoError = false;
+
+    try {
+      _videoController = VideoPlayerController.network(url);
+      await _videoController!.initialize();
+      _videoController!.setVolume(0);
+
+      _chewieController = ChewieController(
+        videoPlayerController: _videoController!,
+        autoPlay: false,
+        looping: true,
+        allowMuting: true,
+        showControls: true,
+        errorBuilder: (context, errorMessage) => _buildVideoErrorWidget(),
+        materialProgressColors: ChewieProgressColors(
+          playedColor: Colors.orange,
+          handleColor: Colors.orange,
+          backgroundColor: Colors.grey,
+          bufferedColor: Colors.white30,
+        ),
+      );
+    } catch (e) {
+      debugPrint("VIDEO INIT FAILED: $e");
+      _videoError = true;
+      _videoController?.dispose();
+      _videoController = null;
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildVideoErrorWidget() {
+    return Container(
+      color: Colors.grey[800],
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: Colors.orange, size: 48),
+            SizedBox(height: 8),
+            Text("Video unavailable", style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _saveNotes() async {
@@ -385,7 +446,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _adjustRest(int seconds) {
-    if (widget.isViewOnly) return;
+    if (widget.isViewOnly) return; // ← FIXED: was 887widget
     setState(() {
       restDuration =
           Duration(seconds: (restDuration.inSeconds + seconds).clamp(15, 3600));
@@ -394,7 +455,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _logOrComplete() async {
-    if (widget.isViewOnly) return;
+    if (widget.isViewOnly || !widget.isWorkoutStarted) return;
 
     final currentSet =
         sets.firstWhere((s) => s['isLogged'] != true, orElse: () => sets.last);
@@ -443,7 +504,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _openFullScreenVideo() {
-    if (_chewieController == null) return;
+    if (_chewieController == null || _videoError) return;
 
     Navigator.push(
       context,
@@ -452,7 +513,9 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
           backgroundColor: Colors.black,
           appBar: AppBar(backgroundColor: Colors.black),
           body: Center(
-            child: Chewie(controller: _chewieController!),
+            child: _videoError
+                ? _buildVideoErrorWidget()
+                : Chewie(controller: _chewieController!),
           ),
         ),
       ),
@@ -461,7 +524,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final int totalPages = _hasVideo ? 2 : 1;
+    final int totalPages = _hasVideo && !_videoError ? 2 : 1;
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -483,302 +546,340 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator(color: Colors.orange))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // IMAGE + VIDEO CAROUSEL WITH ARROWS
-                  Container(
-                    height: 240,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      color: const Color(0xFF1C1C1E),
-                    ),
-                    child: Stack(
-                      children: [
-                        PageView(
-                          controller: _pageController,
+          : Stack(
+              children: [
+                SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      // IMAGE + VIDEO CAROUSEL
+                      Container(
+                        height: 240,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          color: const Color(0xFF1C1C1E),
+                        ),
+                        child: Stack(
                           children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: Image.network(
-                                widget.exercise['imageUrl'] ?? '',
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                  color: Colors.grey[800],
-                                  child: const Icon(Icons.fitness_center,
-                                      size: 80, color: Colors.white54),
-                                ),
-                              ),
-                            ),
-                            if (_hasVideo && _videoController != null)
-                              GestureDetector(
-                                onTap: _openFullScreenVideo,
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: Chewie(
-                                          controller: _chewieController!),
+                            PageView(
+                              controller: _pageController,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Image.network(
+                                    widget.exercise['imageUrl'] ?? '',
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.grey[800],
+                                      child: const Icon(Icons.fitness_center,
+                                          size: 80, color: Colors.white54),
                                     ),
-                                    Center(
-                                      child: Container(
-                                        padding: const EdgeInsets.all(16),
-                                        decoration: const BoxDecoration(
-                                          color: Colors.black54,
-                                          shape: BoxShape.circle,
+                                  ),
+                                ),
+                                if (_hasVideo)
+                                  GestureDetector(
+                                    onTap: _openFullScreenVideo,
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          child: _videoError
+                                              ? _buildVideoErrorWidget()
+                                              : (_chewieController != null
+                                                  ? Chewie(
+                                                      controller:
+                                                          _chewieController!)
+                                                  : const Center(
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                              color: Colors
+                                                                  .orange))),
                                         ),
-                                        child: const Icon(Icons.play_arrow,
-                                            size: 60, color: Colors.white),
-                                      ),
+                                        if (!_videoError)
+                                          Center(
+                                            child: Container(
+                                              padding: const EdgeInsets.all(16),
+                                              decoration: const BoxDecoration(
+                                                  color: Colors.black54,
+                                                  shape: BoxShape.circle),
+                                              child: const Icon(
+                                                  Icons.play_arrow,
+                                                  size: 60,
+                                                  color: Colors.white),
+                                            ),
+                                          ),
+                                      ],
                                     ),
-                                  ],
+                                  ),
+                              ],
+                            ),
+                            if (_currentPage > 0)
+                              Positioned(
+                                left: 8,
+                                top: 0,
+                                bottom: 0,
+                                child: IconButton(
+                                  icon: const Icon(Icons.chevron_left,
+                                      size: 40, color: Colors.white70),
+                                  onPressed: () => _pageController.previousPage(
+                                      duration:
+                                          const Duration(milliseconds: 300),
+                                      curve: Curves.ease),
+                                ),
+                              ),
+                            if (_currentPage < totalPages - 1)
+                              Positioned(
+                                right: 8,
+                                top: 0,
+                                bottom: 0,
+                                child: IconButton(
+                                  icon: const Icon(Icons.chevron_right,
+                                      size: 40, color: Colors.white70),
+                                  onPressed: () => _pageController.nextPage(
+                                      duration:
+                                          const Duration(milliseconds: 300),
+                                      curve: Curves.ease),
                                 ),
                               ),
                           ],
                         ),
-                        // LEFT ARROW
-                        if (_currentPage > 0)
-                          Positioned(
-                            left: 8,
-                            top: 0,
-                            bottom: 0,
-                            child: IconButton(
-                              icon: const Icon(Icons.chevron_left,
-                                  size: 40, color: Colors.white70),
-                              onPressed: () => _pageController.previousPage(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.ease),
-                            ),
-                          ),
-                        // RIGHT ARROW
-                        if (_currentPage < totalPages - 1)
-                          Positioned(
-                            right: 8,
-                            top: 0,
-                            bottom: 0,
-                            child: IconButton(
-                              icon: const Icon(Icons.chevron_right,
-                                  size: 40, color: Colors.white70),
-                              onPressed: () => _pageController.nextPage(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.ease),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // HEADER ROW
-                  Row(
-                    children: [
-                      const SizedBox(width: 50),
-                      _headerCell("REPS", "per arm"),
-                      _headerCell("WEIGHT", "($weightUnit)"),
-                      _headerCell("RIR", "reps in reserve"),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-
-                  // SET ROWS WITH SWIPE TO DELETE
-                  ...sets.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final s = entry.value;
-                    final logged = s['isLogged'] == true;
-                    final is1RM = s['isMax'] == true;
-                    final isMaxWeight = s['kg'] == maxWeight && !is1RM;
-
-                    return Dismissible(
-                      key: Key(s['uniqueId'].toString()),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        color: Colors.red,
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        child: const Icon(Icons.delete,
-                            color: Colors.white, size: 30),
                       ),
-                      onDismissed: (_) => _deleteSet(index),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: logged
-                              ? Colors.orange.withOpacity(0.2)
-                              : const Color(0xFF1C1C1E),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 50,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  if (is1RM)
-                                    const Icon(Icons.emoji_events,
-                                        color: Colors.amber, size: 20),
-                                  if (isMaxWeight && !is1RM)
-                                    const Icon(Icons.emoji_events_outlined,
-                                        color: Colors.orange, size: 20),
-                                  if (!is1RM && !isMaxWeight)
-                                    Text('Set ${s['set']}',
-                                        style: TextStyle(
-                                            color: logged
-                                                ? Colors.orange
-                                                : Colors.white,
-                                            fontWeight: FontWeight.bold)),
-                                ],
+                      const SizedBox(height: 20),
+
+                      // BANNER: Workout not started
+                      if (!widget.isWorkoutStarted)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12)),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.info_outline, color: Colors.orange),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                    'Start the workout first to log sets.',
+                                    style: TextStyle(color: Colors.orange)),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            _numberInput(
-                                (val) => setState(() =>
-                                    s['reps'] = double.tryParse(val) ?? 0),
-                                s['reps']?.toInt().toString() ?? '',
-                                logged),
-                            _numberInput(
-                                (val) => setState(
-                                    () => s['kg'] = double.tryParse(val) ?? 0),
-                                s['kg']?.toString().replaceAll('.0', '') ?? '',
-                                logged),
-                            _numberInput(
-                                (val) => setState(
-                                    () => s['rir'] = double.tryParse(val) ?? 0),
-                                s['rir']?.toInt().toString() ?? '',
-                                logged),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
 
-                  const SizedBox(height: 20),
-
-                  // REST TIMER
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (!widget.isViewOnly)
-                        GestureDetector(
-                            onTap: _addSet,
-                            child: const Text('+ Add Set',
-                                style: TextStyle(
-                                    color: Colors.orange,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold))),
-                      Row(children: [
-                        const Text('Rest: ',
-                            style: TextStyle(color: Colors.white)),
-                        Text(
-                          isResting
-                              ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
-                              : '${defaultRestDuration.inMinutes}:${(defaultRestDuration.inSeconds % 60).toString().padLeft(2, '0')}',
-                          style: const TextStyle(
-                              color: Colors.orange,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18),
-                        ),
-                        if (!widget.isViewOnly) ...[
-                          IconButton(
-                              icon: const Icon(Icons.remove_circle_outline,
-                                  color: Colors.orange),
-                              onPressed: () => _adjustRest(-15)),
-                          const Text('15s',
-                              style: TextStyle(color: Colors.orange)),
-                          IconButton(
-                              icon: const Icon(Icons.add_circle_outline,
-                                  color: Colors.orange),
-                              onPressed: () => _adjustRest(15)),
+                      // HEADER ROW
+                      Row(
+                        children: [
+                          const SizedBox(width: 50),
+                          _headerCell("REPS", "per arm"),
+                          _headerCell("WEIGHT", "($weightUnit)"),
+                          _headerCell("RIR", "reps in reserve"),
                         ],
-                      ]),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      Row(children: [
-                        const Icon(Icons.emoji_events, color: Colors.amber),
-                        Text(
-                            ' 1RM: ${oneRepMax.toStringAsFixed(0)} $weightUnit',
-                            style: const TextStyle(color: Colors.white))
-                      ]),
-                      Row(children: [
-                        const Icon(Icons.emoji_events_outlined,
-                            color: Colors.orange),
-                        Text(
-                            ' Max: ${maxWeight.toStringAsFixed(1)} $weightUnit',
-                            style: const TextStyle(color: Colors.white))
-                      ]),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // LOG BUTTON - ONLY WHEN NOT RESTING
-                  if (_showLogButton &&
-                      !isWorkoutComplete &&
-                      !widget.isViewOnly)
-                    ElevatedButton(
-                      onPressed: _logOrComplete,
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          minimumSize: const Size(double.infinity, 56),
-                          shape: const StadiumBorder()),
-                      child: Text(
-                          sets.any((s) => s['isLogged'] != true)
-                              ? 'Log Set'
-                              : 'Complete Set',
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
-                    ),
-
-                  if (isWorkoutComplete)
-                    GestureDetector(
-                      onTap: widget.isViewOnly ? null : _toggleEditMode,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                        decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(16)),
-                        child: Center(
-                          child: Text(
-                              widget.isViewOnly
-                                  ? 'Workout Completed - View Only'
-                                  : 'Workout Complete! Tap to edit',
-                              style: const TextStyle(
-                                  color: Colors.green,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold)),
-                        ),
                       ),
-                    ),
+                      const SizedBox(height: 8),
 
-                  const SizedBox(height: 20),
+                      // SET ROWS
+                      ...sets.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final s = entry.value;
+                        final logged = s['isLogged'] == true;
+                        final is1RM = s['isMax'] == true;
+                        final isMaxWeight = s['kg'] == maxWeight && !is1RM;
 
-                  // NOTES
-                  TextField(
-                    controller: _notesController,
-                    enabled: !widget.isViewOnly,
-                    onChanged: (_) => _saveNotes(),
-                    decoration: InputDecoration(
-                        hintText: 'Add notes here',
-                        hintStyle: const TextStyle(color: Colors.white38),
-                        filled: true,
-                        fillColor: const Color(0xFF1C1C1E),
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none)),
-                    style: const TextStyle(color: Colors.white),
-                    maxLines: 4,
+                        return Dismissible(
+                          key: Key(s['uniqueId'].toString()),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            color: Colors.red,
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            child: const Icon(Icons.delete,
+                                color: Colors.white, size: 30),
+                          ),
+                          onDismissed: (_) => _deleteSet(index),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: logged
+                                  ? Colors.orange.withOpacity(0.2)
+                                  : const Color(0xFF1C1C1E),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 50,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (is1RM)
+                                        const Icon(Icons.emoji_events,
+                                            color: Colors.amber, size: 20),
+                                      if (isMaxWeight && !is1RM)
+                                        const Icon(Icons.emoji_events_outlined,
+                                            color: Colors.orange, size: 20),
+                                      if (!is1RM && !isMaxWeight)
+                                        Text('Set ${s['set']}',
+                                            style: TextStyle(
+                                                color: logged
+                                                    ? Colors.orange
+                                                    : Colors.white,
+                                                fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                _numberInput(
+                                    (val) => setState(() =>
+                                        s['reps'] = double.tryParse(val) ?? 0),
+                                    s['reps']?.toInt().toString() ?? '',
+                                    logged),
+                                _numberInput(
+                                    (val) => setState(() =>
+                                        s['kg'] = double.tryParse(val) ?? 0),
+                                    s['kg']?.toString().replaceAll('.0', '') ??
+                                        '',
+                                    logged),
+                                _numberInput(
+                                    (val) => setState(() =>
+                                        s['rir'] = double.tryParse(val) ?? 0),
+                                    s['rir']?.toInt().toString() ?? '',
+                                    logged),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+
+                      const SizedBox(height: 20),
+
+                      // REST TIMER
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          if (!widget.isViewOnly)
+                            GestureDetector(
+                                onTap: _addSet,
+                                child: const Text('+ Add Set',
+                                    style: TextStyle(
+                                        color: Colors.orange,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold))),
+                          Row(children: [
+                            const Text('Rest: ',
+                                style: TextStyle(color: Colors.white)),
+                            Text(
+                              isResting
+                                  ? '${restDuration.inMinutes}:${(restDuration.inSeconds % 60).toString().padLeft(2, '0')}'
+                                  : '${defaultRestDuration.inMinutes}:${(defaultRestDuration.inSeconds % 60).toString().padLeft(2, '0')}',
+                              style: const TextStyle(
+                                  color: Colors.orange,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18),
+                            ),
+                            if (!widget.isViewOnly) ...[
+                              IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline,
+                                      color: Colors.orange),
+                                  onPressed: () => _adjustRest(-15)),
+                              const Text('15s',
+                                  style: TextStyle(color: Colors.orange)),
+                              IconButton(
+                                  icon: const Icon(Icons.add_circle_outline,
+                                      color: Colors.orange),
+                                  onPressed: () => _adjustRest(15)),
+                            ],
+                          ]),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.emoji_events, color: Colors.amber),
+                            Text(
+                                ' 1RM: ${oneRepMax.toStringAsFixed(0)} $weightUnit',
+                                style: const TextStyle(color: Colors.white))
+                          ]),
+                          Row(children: [
+                            const Icon(Icons.emoji_events_outlined,
+                                color: Colors.orange),
+                            Text(
+                                ' Max: ${maxWeight.toStringAsFixed(1)} $weightUnit',
+                                style: const TextStyle(color: Colors.white))
+                          ]),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // LOG BUTTON
+                      if (_showLogButton &&
+                          !isWorkoutComplete &&
+                          !widget.isViewOnly)
+                        ElevatedButton(
+                          onPressed: _logOrComplete,
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              minimumSize: const Size(double.infinity, 56),
+                              shape: const StadiumBorder()),
+                          child: Text(
+                              sets.any((s) => s['isLogged'] != true)
+                                  ? 'Log Set'
+                                  : 'Complete Set',
+                              style: const TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold)),
+                        ),
+
+                      if (isWorkoutComplete)
+                        GestureDetector(
+                          onTap: widget.isViewOnly ? null : _toggleEditMode,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 20),
+                            decoration: BoxDecoration(
+                                color: Colors.green.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(16)),
+                            child: Center(
+                              child: Text(
+                                  widget.isViewOnly
+                                      ? 'Workout Completed - View Only'
+                                      : 'Workout Complete! Tap to edit',
+                                  style: const TextStyle(
+                                      color: Colors.green,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ),
+
+                      const SizedBox(height: 20),
+
+                      // NOTES
+                      TextField(
+                        controller: _notesController,
+                        enabled: !widget.isViewOnly,
+                        onChanged: (_) => _saveNotes(),
+                        decoration: InputDecoration(
+                            hintText: 'Add notes here',
+                            hintStyle: const TextStyle(color: Colors.white38),
+                            filled: true,
+                            fillColor: const Color(0xFF1C1C1E),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide.none)),
+                        style: const TextStyle(color: Colors.white),
+                        maxLines: 4,
+                      ),
+                      const SizedBox(height: 80),
+                    ],
                   ),
-                  const SizedBox(height: 80),
-                ],
-              ),
+                ),
+              ],
             ),
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: const Color(0xFF1C1C1E),
@@ -847,9 +948,8 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) =>
-                    InstructionsScreen(exercise: widget.exercise),
-              ),
+                  builder: (context) =>
+                      InstructionsScreen(exercise: widget.exercise)),
             );
           }
         },
@@ -880,7 +980,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         margin: const EdgeInsets.symmetric(horizontal: 6),
         child: TextFormField(
           initialValue: initialValue,
-          enabled: !logged && !widget.isViewOnly,
+          enabled: !logged && !widget.isViewOnly && widget.isWorkoutStarted,
           keyboardType: TextInputType.numberWithOptions(decimal: true),
           textAlign: TextAlign.center,
           style: TextStyle(
