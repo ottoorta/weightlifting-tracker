@@ -40,6 +40,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     currentExercises = widget.exercises;
     _checkWorkoutStatus();
     _loadPublicStatus();
+    _loadExercisesWithCustomSupport(); // ← NEW: Load customs
   }
 
   @override
@@ -263,8 +264,22 @@ https://ironcoach.app
     _timer?.cancel();
   }
 
-  // === LOAD EXERCISES AFTER ADDING ===
-  Future<void> _loadExercises() async {
+  // === ADD EXERCISES ===
+  Future<void> _addExercises() async {
+    final result = await Navigator.pushNamed(
+      context,
+      '/add_exercises',
+      arguments: widget.workout['id'],
+    );
+
+    if (result == true) {
+      await _loadExercisesWithCustomSupport(); // ← Reload with customs
+      await _calculateTotals();
+    }
+  }
+
+  // === LOAD EXERCISES WITH CUSTOM SUPPORT (NEW) ===
+  Future<void> _loadExercisesWithCustomSupport() async {
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -276,36 +291,50 @@ https://ironcoach.app
     final List<Map<String, dynamic>> loaded = [];
 
     for (String id in exerciseIds) {
-      final exDoc = await FirebaseFirestore.instance
+      // 1. Try official
+      final officialDoc = await FirebaseFirestore.instance
           .collection('exercises')
           .doc(id)
           .get();
-      if (exDoc.exists) {
+
+      if (officialDoc.exists) {
         loaded.add({
           'id': id,
-          ...exDoc.data()!,
+          'isCustom': false,
+          ...officialDoc.data()!,
           'sets': 4,
           'reps': '10-12',
           'weight': '20',
         });
+        continue;
+      }
+
+      // 2. Try custom (user or public)
+      final customDoc = await FirebaseFirestore.instance
+          .collection('exercises_custom')
+          .doc(id)
+          .get();
+
+      if (customDoc.exists) {
+        final customData = customDoc.data()!;
+        final isOwner =
+            customData['userId'] == FirebaseAuth.instance.currentUser?.uid;
+        final isPublic = customData['isPublic'] == true;
+
+        if (isOwner || isPublic) {
+          loaded.add({
+            'id': id,
+            'isCustom': true,
+            ...customData,
+            'sets': 4,
+            'reps': '10-12',
+            'weight': '20',
+          });
+        }
       }
     }
 
     setState(() => currentExercises = loaded);
-  }
-
-  // === NAVIGATE TO ADD EXERCISES ===
-  Future<void> _addExercises() async {
-    final result = await Navigator.pushNamed(
-      context,
-      '/add_exercises',
-      arguments: widget.workout['id'],
-    );
-
-    if (result == true) {
-      await _loadExercises();
-      await _calculateTotals();
-    }
   }
 
   String _formatDuration(Duration d) {
@@ -543,6 +572,11 @@ https://ironcoach.app
             final isComplete = loggedCount >= totalSets;
             final hasProgress = loggedCount > 0;
 
+            // ← NEW: Gray if workout completed
+            final cardColor = isWorkoutCompleted
+                ? Colors.grey[700]!
+                : (hasProgress ? Colors.orange : const Color(0xFF1C1C1E));
+
             return GestureDetector(
               onTap: () async {
                 if (!isWorkoutStarted) _startWorkout();
@@ -563,7 +597,7 @@ https://ironcoach.app
                 margin: const EdgeInsets.only(bottom: 20),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: hasProgress ? Colors.orange : const Color(0xFF1C1C1E),
+                  color: cardColor,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
