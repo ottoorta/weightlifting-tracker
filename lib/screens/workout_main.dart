@@ -50,6 +50,8 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     _checkWorkoutStatus();
     _loadPublicStatus();
     _calculateMuscleTargets();
+    // Load full exercises to ensure 'exerciseDocId' is set
+    _loadExercisesWithCustomSupport();
   }
 
   @override
@@ -378,6 +380,53 @@ https://ironcoach.app
     return map[muscle.toLowerCase()] ?? Colors.green;
   }
 
+  // === UNDO SNACKBAR HELPER ===
+  void _showUndoSnackBar(
+      Map<String, dynamic> removed, int index, String? docId) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${removed['name'] ?? 'Exercise'} removed'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'UNDO',
+          textColor: Colors.orange,
+          onPressed: () async {
+            try {
+              if (docId != null && docId != 'unknown') {
+                await FirebaseFirestore.instance
+                    .collection('workouts')
+                    .doc(widget.workout['id'])
+                    .update({
+                  'exerciseIds': FieldValue.arrayUnion([docId]),
+                });
+              }
+
+              setState(() {
+                currentExercises.insert(index, removed);
+              });
+
+              await _calculateTotals();
+              await _calculateMuscleTargets();
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                    content: Text('${removed['name'] ?? 'Exercise'} restored!'),
+                    backgroundColor: Colors.green),
+              );
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                    content: Text('Undo failed: $e'),
+                    backgroundColor: Colors.red),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   // BUILD
   @override
   Widget build(BuildContext context) {
@@ -472,7 +521,7 @@ https://ironcoach.app
                       ),
                   ],
                 ),
-                const SizedBox(height: 16), // ← FIXED: was SizedSized
+                const SizedBox(height: 16),
 
                 // TARGET MUSCLES
                 const Text('Target Muscles',
@@ -488,6 +537,7 @@ https://ironcoach.app
                     itemCount: _muscleTargets.length,
                     itemBuilder: (ctx, idx) {
                       final t = _muscleTargets[idx];
+                      final imageUrl = t['imageUrl']?.toString().trim();
                       return Container(
                         margin: const EdgeInsets.only(right: 12),
                         padding: const EdgeInsets.all(12),
@@ -500,10 +550,11 @@ https://ironcoach.app
                           children: [
                             ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: t['imageUrl'] != null &&
-                                      t['imageUrl'].isNotEmpty
+                              child: (imageUrl != null &&
+                                      imageUrl.isNotEmpty &&
+                                      imageUrl.startsWith('http'))
                                   ? Image.network(
-                                      t['imageUrl'],
+                                      imageUrl,
                                       width: 40,
                                       height: 40,
                                       fit: BoxFit.cover,
@@ -515,7 +566,8 @@ https://ironcoach.app
                                   : Container(
                                       width: 40,
                                       height: 40,
-                                      color: Colors.grey),
+                                      color: Colors.grey,
+                                    ),
                             ),
                             const SizedBox(width: 8),
                             Column(
@@ -584,7 +636,9 @@ https://ironcoach.app
                           borderRadius: BorderRadius.circular(20)),
                       child: Row(
                         children: [
-                          if (image != null && image.isNotEmpty)
+                          if (image != null &&
+                              image.isNotEmpty &&
+                              image.startsWith('http'))
                             ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: Image.network(
@@ -649,45 +703,87 @@ https://ironcoach.app
                           color: Colors.white, size: 32),
                     ),
                     onDismissed: (_) async {
+                      debugPrint('On Dismisseddddddddddddddddddd');
                       final removed = Map<String, dynamic>.from(ex);
-                      final docId = removed['exerciseDocId'] as String?;
 
+                      // === 1. Optimistic UI Remove ===
                       setState(() => currentExercises.removeAt(index));
 
-                      if (docId != null && docId != 'unknown') {
-                        await FirebaseFirestore.instance
+                      String? docId;
+                      try {
+                        // === 2. Fetch current exerciseIds ===
+                        final workoutSnap = FirebaseFirestore.instance
                             .collection('workouts')
                             .doc(widget.workout['id'])
-                            .update({
-                          'exerciseIds': FieldValue.arrayRemove([docId])
-                        });
+                            .get();
+
+                        final snapshot = await workoutSnap;
+                        final currentIds = List<String>.from(
+                            snapshot.data()?['exerciseIds'] ?? []);
+
+                        if (index < currentIds.length) {
+                          docId = currentIds[index];
+                          debugPrint('Fetched docId from index: $docId');
+                        } else {
+                          debugPrint('Index out of bounds for exerciseIds');
+                        }
+                      } catch (e) {
+                        debugPrint('Failed to fetch exerciseIds: $e');
                       }
 
-                      await _calculateTotals();
-                      await _calculateMuscleTargets();
+                      // === 3. Final check ===
+                      if (docId == null || docId.isEmpty) {
+                        debugPrint('No valid docId — skipping Firestore ops');
+                        await _calculateTotals();
+                        await _calculateMuscleTargets();
+                        _showUndoSnackBar(removed, index, docId);
+                        return;
+                      }
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('${removed['name']} removed'),
-                          action: SnackBarAction(
-                            label: 'UNDO',
-                            onPressed: () async {
-                              if (docId != null && docId != 'unknown') {
-                                await FirebaseFirestore.instance
-                                    .collection('workouts')
-                                    .doc(widget.workout['id'])
-                                    .update({
-                                  'exerciseIds': FieldValue.arrayUnion([docId])
-                                });
-                              }
-                              setState(() =>
-                                  currentExercises.insert(index, removed));
-                              await _calculateTotals();
-                              await _calculateMuscleTargets();
-                            },
+                      try {
+                        final workoutRef = FirebaseFirestore.instance
+                            .collection('workouts')
+                            .doc(widget.workout['id']);
+
+                        // === 4. Remove from exerciseIds ===
+                        await workoutRef.update({
+                          'exerciseIds': FieldValue.arrayRemove([docId]),
+                        });
+
+                        // === 5. Delete logged sets ===
+                        final loggedSetsSnap = await workoutRef
+                            .collection('logged_sets')
+                            .where('exerciseId', isEqualTo: docId)
+                            .get();
+
+                        if (loggedSetsSnap.docs.isNotEmpty) {
+                          final batch = FirebaseFirestore.instance.batch();
+                          for (var doc in loggedSetsSnap.docs) {
+                            batch.delete(doc.reference);
+                          }
+                          await batch.commit();
+                        }
+
+                        // === 6. Success ===
+                        await _calculateTotals();
+                        await _calculateMuscleTargets();
+                        _showUndoSnackBar(removed, index, docId);
+                      } catch (e, stackTrace) {
+                        debugPrint('DELETE FAILED: $e\n$stackTrace');
+
+                        // === 7. ROLLBACK UI ===
+                        setState(() => currentExercises.insert(index, removed));
+                        await _calculateTotals();
+                        await _calculateMuscleTargets();
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Delete failed: $e'),
+                            backgroundColor: Colors.red,
+                            duration: const Duration(seconds: 6),
                           ),
-                        ),
-                      );
+                        );
+                      }
                     },
                     child: card,
                   );
