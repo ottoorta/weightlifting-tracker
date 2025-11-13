@@ -35,6 +35,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
   List<String> exerciseNames = ['None'];
   bool isLoading = true;
 
+  // For video URL validation feedback
+  String? _videoUrlError;
+
   @override
   void initState() {
     super.initState();
@@ -85,41 +88,89 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
     return await ref.getDownloadURL();
   }
 
+  // Validate video URL format
+  bool _isValidVideoUrl(String url) {
+    if (url.isEmpty) return true; // Optional field
+    final trimmed = url.trim();
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasScheme || !uri.host.contains('.')) return false;
+
+    final lower = trimmed.toLowerCase();
+    return lower.contains('youtube.com') ||
+        lower.contains('youtu.be') ||
+        lower.contains('vimeo.com') ||
+        lower.contains('.mp4') ||
+        lower.contains('.webm') ||
+        lower.contains('.mov');
+  }
+
   Future<void> _saveExercise() async {
     if (!_formKey.currentState!.validate() || user == null) return;
-    _formKey.currentState!.save();
 
+    // Validate video URL
+    if (videoUrl.isNotEmpty && !_isValidVideoUrl(videoUrl)) {
+      setState(() {
+        _videoUrlError =
+            'Please enter a valid video URL (YouTube, Vimeo, .mp4, etc.)';
+      });
+      return;
+    } else {
+      setState(() => _videoUrlError = null);
+    }
+
+    _formKey.currentState!.save();
     setState(() => isLoading = true);
 
     final imageUrl = await _uploadImage();
 
+    List<String> muscles = [];
+    if (primaryMuscle != null && primaryMuscle != 'None') {
+      muscles.add(primaryMuscle!);
+    }
+    if (secondaryMuscle != null && secondaryMuscle != 'None') {
+      muscles.add(secondaryMuscle!);
+    }
+
     final customExercise = {
-      'name': name,
+      'name': name.trim(),
       'type': type,
-      'primaryMuscle': primaryMuscle == 'None' ? null : primaryMuscle,
-      'secondaryMuscle': secondaryMuscle == 'None' ? null : secondaryMuscle,
-      'equipment': equipment == 'None' ? [] : [equipment],
+      'muscles': muscles,
+      'equipment': equipment == 'None' || equipment == null ? [] : [equipment!],
       'importance': importance,
       'relatedExercises': relatedExercises.where((e) => e != 'None').toList(),
-      'instructions': instructions,
-      'videoUrl': videoUrl,
+      'instructions': instructions.trim(),
+      'videoUrl': videoUrl.trim(),
       'imageUrl': imageUrl,
       'userId': user!.uid,
       'isPublic': false,
       'createdAt': FieldValue.serverTimestamp(),
     };
 
-    await FirebaseFirestore.instance
-        .collection('exercises_custom')
-        .add(customExercise);
+    try {
+      await FirebaseFirestore.instance
+          .collection('exercises_custom')
+          .add(customExercise);
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Custom exercise added!'),
-            backgroundColor: Colors.green),
-      );
-      Navigator.pop(context, true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Custom exercise added successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving exercise: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -133,8 +184,10 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
           icon: const Icon(Icons.arrow_back_ios, color: Colors.orange),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text("Add Custom Exercise",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Add Custom Exercise",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator(color: Colors.orange))
@@ -145,6 +198,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Image Picker
                     Center(
                       child: GestureDetector(
                         onTap: _pickImage,
@@ -157,7 +211,8 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                             image: _image != null
                                 ? DecorationImage(
                                     image: FileImage(_image!),
-                                    fit: BoxFit.cover)
+                                    fit: BoxFit.cover,
+                                  )
                                 : null,
                           ),
                           child: _image == null
@@ -166,9 +221,10 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                                   children: [
                                     Icon(Icons.camera_alt,
                                         color: Colors.orange, size: 40),
-                                    Text("Add Image",
-                                        style:
-                                            TextStyle(color: Colors.white70)),
+                                    Text(
+                                      "Add Image",
+                                      style: TextStyle(color: Colors.white70),
+                                    ),
                                   ],
                                 )
                               : null,
@@ -176,21 +232,26 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
+
+                    // Name
                     TextFormField(
                       decoration: InputDecoration(
                         labelText: "Name",
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       style: const TextStyle(color: Colors.white),
                       validator: (val) =>
-                          val?.isEmpty == true ? 'Required' : null,
-                      onSaved: (val) => name = val!,
+                          val?.trim().isEmpty == true ? 'Required' : null,
+                      onSaved: (val) => name = val!.trim(),
                     ),
                     const SizedBox(height: 16),
+
+                    // Type
                     DropdownButtonFormField<String>(
                       value: type,
                       decoration: InputDecoration(
@@ -198,8 +259,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: [
@@ -217,6 +279,8 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       onChanged: (val) => setState(() => type = val!),
                     ),
                     const SizedBox(height: 16),
+
+                    // Primary Muscle
                     DropdownButtonFormField<String>(
                       value: primaryMuscle,
                       hint: const Text("Primary Muscle",
@@ -226,8 +290,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: muscleList
@@ -239,6 +304,8 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       onChanged: (val) => setState(() => primaryMuscle = val),
                     ),
                     const SizedBox(height: 16),
+
+                    // Secondary Muscle
                     DropdownButtonFormField<String>(
                       value: secondaryMuscle,
                       hint: const Text("Secondary Muscle",
@@ -248,8 +315,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: muscleList
@@ -261,6 +329,8 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       onChanged: (val) => setState(() => secondaryMuscle = val),
                     ),
                     const SizedBox(height: 16),
+
+                    // Equipment
                     DropdownButtonFormField<String>(
                       value: equipment,
                       hint: const Text("Equipment",
@@ -270,8 +340,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: equipmentList
@@ -283,6 +354,8 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       onChanged: (val) => setState(() => equipment = val),
                     ),
                     const SizedBox(height: 16),
+
+                    // Importance
                     DropdownButtonFormField<String>(
                       value: importance,
                       decoration: InputDecoration(
@@ -290,8 +363,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: ['High', 'Medium', 'Low']
@@ -303,6 +377,8 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       onChanged: (val) => setState(() => importance = val!),
                     ),
                     const SizedBox(height: 16),
+
+                    // Related Exercises
                     DropdownButtonFormField<String>(
                       hint: const Text("Related Exercises",
                           style: TextStyle(color: Colors.white70)),
@@ -311,8 +387,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: exerciseNames
@@ -346,43 +423,68 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                             .toList(),
                       ),
                     const SizedBox(height: 16),
+
+                    // Video URL with validation
                     TextFormField(
                       decoration: InputDecoration(
                         labelText: "Video URL (optional)",
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        errorText: _videoUrlError,
+                        errorStyle: const TextStyle(color: Colors.redAccent),
                       ),
                       style: const TextStyle(color: Colors.white),
-                      onSaved: (val) => videoUrl = val ?? '',
+                      onChanged: (val) {
+                        setState(() {
+                          videoUrl = val;
+                          _videoUrlError = null; // Clear on typing
+                        });
+                      },
+                      onSaved: (val) => videoUrl = val?.trim() ?? '',
                     ),
                     const SizedBox(height: 16),
+
+                    // Instructions
                     TextFormField(
                       decoration: InputDecoration(
                         labelText: "Add instructions here",
                         filled: true,
                         fillColor: const Color(0xFF1C1C1E),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                       style: const TextStyle(color: Colors.white),
                       maxLines: 5,
-                      onSaved: (val) => instructions = val ?? '',
+                      onSaved: (val) => instructions = val?.trim() ?? '',
                     ),
                     const SizedBox(height: 32),
+
+                    // Submit Button
                     ElevatedButton(
-                      onPressed: _saveExercise,
+                      onPressed: isLoading ? null : _saveExercise,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.orange,
                         minimumSize: const Size(double.infinity, 56),
                         shape: const StadiumBorder(),
                       ),
-                      child: const Text("+ Add",
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
+                      child: isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Text(
+                              "+ Add",
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
                     ),
                   ],
                 ),
