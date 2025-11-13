@@ -38,7 +38,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   late List<Map<String, dynamic>> currentExercises;
   bool isPublic = false;
 
-  /// Guarantees every exercise has a stable unique identifier.
+  /// Stable unique identifier for every list item.
   int _uniqueIdCounter = 0;
 
   // -----------------------------------------------------------------
@@ -50,7 +50,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     currentExercises = widget.exercises;
     _checkWorkoutStatus();
     _loadPublicStatus();
-    _loadExercisesWithCustomSupport();
+    _loadExercisesWithCustomSupport(); // ONE-TIME load
   }
 
   @override
@@ -161,58 +161,35 @@ https://ironcoach.app
   }
 
   // -----------------------------------------------------------------
-  //  FIRESTORE HELPERS
+  //  LOGGED-SETS COUNT – **cached per exercise**
   // -----------------------------------------------------------------
-  Future<String> _getExerciseId(Map<String, dynamic> ex) async {
-    if (ex['id'] != null && ex['id'] != 'unknown') return ex['id'];
-
-    final workoutDoc = await FirebaseFirestore.instance
-        .collection('workouts')
-        .doc(widget.workout['id'])
-        .get();
-
-    if (!workoutDoc.exists) return 'unknown';
-
-    final data = workoutDoc.data()!;
-    final List<dynamic> exerciseIds = data['exerciseIds'] ?? [];
-    final exerciseName = ex['name']?.toString().toLowerCase() ?? '';
-
-    for (String id in exerciseIds) {
-      final doc = await FirebaseFirestore.instance
-          .collection('exercises')
-          .doc(id)
-          .get();
-      if (doc.exists && doc['name']?.toString().toLowerCase() == exerciseName) {
-        return id;
-      }
-    }
-    return 'unknown';
-  }
-
-  Future<int> _getLoggedSetsCount(String exerciseId) async {
+  Future<int> _getLoggedSetsCount(String exerciseDocId) async {
+    if (exerciseDocId == 'unknown') return 0;
     final snap = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
         .collection('logged_sets')
-        .where('exerciseId', isEqualTo: exerciseId)
+        .where('exerciseId', isEqualTo: exerciseDocId)
         .get();
     return snap.docs.length;
   }
 
   // -----------------------------------------------------------------
-  //  TOTALS
+  //  TOTALS – uses cached IDs
   // -----------------------------------------------------------------
   Future<void> _calculateTotals() async {
     int totalCal = 0;
     double totalVol = 0.0;
 
     for (var ex in currentExercises) {
-      final exerciseId = await _getExerciseId(ex);
+      final docId = ex['exerciseDocId'] as String?;
+      if (docId == null || docId == 'unknown') continue;
+
       final snap = await FirebaseFirestore.instance
           .collection('workouts')
           .doc(widget.workout['id'])
           .collection('logged_sets')
-          .where('exerciseId', isEqualTo: exerciseId)
+          .where('exerciseId', isEqualTo: docId)
           .get();
 
       for (var doc in snap.docs) {
@@ -293,10 +270,10 @@ https://ironcoach.app
   }
 
   // -----------------------------------------------------------------
-  //  LOAD EXERCISES – **assign uniqueId to every entry**
+  //  LOAD EXERCISES – **single source of truth**
   // -----------------------------------------------------------------
   Future<void> _loadExercisesWithCustomSupport() async {
-    _uniqueIdCounter = 0; // fresh IDs every load
+    _uniqueIdCounter = 0;
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -308,6 +285,7 @@ https://ironcoach.app
     final List<Map<String, dynamic>> loaded = [];
 
     for (String id in exerciseIds) {
+      // ---- OFFICIAL ----
       final official = await FirebaseFirestore.instance
           .collection('exercises')
           .doc(id)
@@ -315,17 +293,18 @@ https://ironcoach.app
 
       if (official.exists) {
         loaded.add({
-          'id': id,
+          'exerciseDocId': id, // <-- **real ID**
           'isCustom': false,
           ...official.data()!,
           'sets': 4,
           'reps': '10-12',
           'weight': '20',
-          'uniqueId': _uniqueIdCounter++, // <-- **always set**
+          'uniqueId': _uniqueIdCounter++,
         });
         continue;
       }
 
+      // ---- CUSTOM ----
       final custom = await FirebaseFirestore.instance
           .collection('exercises_custom')
           .doc(id)
@@ -338,13 +317,13 @@ https://ironcoach.app
         final isPublic = cData['isPublic'] == true;
         if (isOwner || isPublic) {
           loaded.add({
-            'id': id,
+            'exerciseDocId': id,
             'isCustom': true,
             ...cData,
             'sets': 4,
             'reps': '10-12',
             'weight': '20',
-            'uniqueId': _uniqueIdCounter++, // <-- **always set**
+            'uniqueId': _uniqueIdCounter++,
           });
         }
       }
@@ -376,7 +355,7 @@ https://ironcoach.app
       );
 
   // -----------------------------------------------------------------
-  //  SAFE IMAGE + PLACEHOLDER
+  //  SAFE IMAGE – handles file:// URLs
   // -----------------------------------------------------------------
   static const _ImagePlaceholder = SizedBox(
     width: 90,
@@ -392,7 +371,10 @@ https://ironcoach.app
 
   Widget _safeNetworkImage(dynamic rawUrl) {
     final String? url = rawUrl?.toString().trim();
-    if (url == null || url.isEmpty || url == 'null') {
+    if (url == null ||
+        url.isEmpty ||
+        url == 'null' ||
+        url.startsWith('file://')) {
       return Container(
         width: 90,
         height: 90,
@@ -420,12 +402,37 @@ https://ironcoach.app
   }
 
   // -----------------------------------------------------------------
-  //  EXERCISE CARD
+  //  MUSCLES TEXT
   // -----------------------------------------------------------------
-  Widget _buildExerciseCard(
-      Map<String, dynamic> ex, String exerciseId, int index) {
+  Widget _buildMusclesText(Map<String, dynamic> ex) {
+    final List<dynamic>? muscles = ex['muscles'] as List<dynamic>?;
+    if (muscles == null || muscles.isEmpty) {
+      return const Text(
+        'Primary muscles',
+        style: TextStyle(color: Colors.white60, fontSize: 12),
+      );
+    }
+
+    final muscleNames = muscles
+        .map((m) => m.toString().trim())
+        .where((m) => m.isNotEmpty)
+        .take(3)
+        .join(', ');
+
+    return Text(
+      muscleNames.isEmpty ? 'Primary muscles' : muscleNames,
+      style: const TextStyle(color: Colors.white60, fontSize: 12),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  // -----------------------------------------------------------------
+  //  EXERCISE CARD – uses cached logged-count
+  // -----------------------------------------------------------------
+  Widget _buildExerciseCard(Map<String, dynamic> ex, int index) {
+    final String docId = ex['exerciseDocId'] as String? ?? 'unknown';
     return FutureBuilder<int>(
-      future: _getLoggedSetsCount(exerciseId),
+      future: _getLoggedSetsCount(docId),
       builder: (context, countSnap) {
         if (!mounted) return const SizedBox.shrink();
 
@@ -490,6 +497,8 @@ https://ironcoach.app
                           fontSize: 14,
                         ),
                       ),
+                      const SizedBox(height: 4),
+                      _buildMusclesText(ex),
                       if (complete)
                         const Padding(
                           padding: EdgeInsets.only(top: 8),
@@ -534,7 +543,6 @@ https://ironcoach.app
         ? _dateFormat.format(DateTime.parse(widget.workout['date']))
         : 'Today';
 
-    // button state
     String btnText;
     Color btnColor;
     VoidCallback? btnAction;
@@ -666,92 +674,76 @@ https://ironcoach.app
                 const SizedBox(height: 20),
 
                 // ==================== EXERCISE LIST ====================
-                ...currentExercises.asMap().entries.map((entry) {
-                  final int index = entry.key;
-                  final Map<String, dynamic> ex = entry.value;
-
-                  // **SAFE UNIQUE ID** – create if missing
+                ...currentExercises.asMap().entries.map((e) {
+                  final int index = e.key;
+                  final Map<String, dynamic> ex = e.value;
                   final int uid = ex['uniqueId'] ??= _uniqueIdCounter++;
 
-                  final Future<String> idFuture = _getExerciseId(ex);
+                  final Widget card = _buildExerciseCard(ex, index);
 
-                  return FutureBuilder<String>(
-                    key: ValueKey('fb_$uid'), // different from Dismissible
-                    future: idFuture,
-                    builder: (context, idSnap) {
-                      if (!idSnap.hasData || idSnap.data == 'unknown') {
-                        return const SizedBox.shrink();
-                      }
-                      final String exerciseId = idSnap.data!;
+                  if (isWorkoutCompleted) return card;
 
-                      final Widget card =
-                          _buildExerciseCard(ex, exerciseId, index);
+                  return Dismissible(
+                    key: Key('dismiss_$uid'),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 20),
+                      child: const Icon(Icons.delete,
+                          color: Colors.white, size: 32),
+                    ),
+                    onDismissed: (_) async {
+                      final scaffold = ScaffoldMessenger.of(context);
+                      final removed = Map<String, dynamic>.from(ex);
+                      final docId = removed['exerciseDocId'] as String?;
 
-                      if (isWorkoutCompleted) return card;
+                      setState(() {
+                        currentExercises.removeAt(index);
+                      });
 
-                      return Dismissible(
-                        key: Key('dismiss_$uid'), // unique
-                        direction: DismissDirection.endToStart,
-                        background: Container(
-                          margin: const EdgeInsets.only(bottom: 20),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 20),
-                          child: const Icon(Icons.delete,
-                              color: Colors.white, size: 32),
-                        ),
-                        onDismissed: (_) async {
-                          final scaffold = ScaffoldMessenger.of(context);
-
-                          // 1. Remove UI instantly
-                          final removed = Map<String, dynamic>.from(ex);
-                          setState(() {
-                            currentExercises.removeAt(index);
+                      if (docId != null && docId != 'unknown') {
+                        try {
+                          await FirebaseFirestore.instance
+                              .collection('workouts')
+                              .doc(widget.workout['id'])
+                              .update({
+                            'exerciseIds': FieldValue.arrayRemove([docId])
                           });
+                        } catch (_) {}
+                      }
 
-                          // 2. Firestore delete
-                          try {
-                            await FirebaseFirestore.instance
-                                .collection('workouts')
-                                .doc(widget.workout['id'])
-                                .update({
-                              'exerciseIds':
-                                  FieldValue.arrayRemove([exerciseId])
-                            });
-                          } catch (_) {}
+                      await _calculateTotals();
 
-                          await _calculateTotals();
-
-                          // 3. Undo
-                          scaffold.showSnackBar(
-                            SnackBar(
-                              content: Text('${removed['name']} removed'),
-                              duration: const Duration(seconds: 3),
-                              action: SnackBarAction(
-                                label: 'UNDO',
-                                onPressed: () async {
-                                  await FirebaseFirestore.instance
-                                      .collection('workouts')
-                                      .doc(widget.workout['id'])
-                                      .update({
-                                    'exerciseIds':
-                                        FieldValue.arrayUnion([exerciseId])
-                                  });
-                                  setState(() {
-                                    currentExercises.insert(index, removed);
-                                  });
-                                  await _calculateTotals();
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                        child: card,
+                      scaffold.showSnackBar(
+                        SnackBar(
+                          content: Text('${removed['name']} removed'),
+                          duration: const Duration(seconds: 3),
+                          action: SnackBarAction(
+                            label: 'UNDO',
+                            onPressed: () async {
+                              if (docId != null && docId != 'unknown') {
+                                await FirebaseFirestore.instance
+                                    .collection('workouts')
+                                    .doc(widget.workout['id'])
+                                    .update({
+                                  'exerciseIds': FieldValue.arrayUnion([docId])
+                                });
+                              }
+                              setState(() {
+                                currentExercises.insert(index, removed);
+                              });
+                              await _calculateTotals();
+                            },
+                          ),
+                        ),
                       );
                     },
+                    child: card,
                   );
                 }).toList(),
 
@@ -824,7 +816,7 @@ https://ironcoach.app
 }
 
 // ---------------------------------------------------------------------
-//  MUSCLE CHIP (demo – unchanged)
+//  MUSCLE CHIP (demo)
 // ---------------------------------------------------------------------
 class MuscleTargetChip extends StatelessWidget {
   final String name;
@@ -848,7 +840,6 @@ class MuscleTargetChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // placeholder – real app would fetch muscle image
           Container(width: 40, height: 40, color: Colors.grey),
           const SizedBox(width: 8),
           Column(
