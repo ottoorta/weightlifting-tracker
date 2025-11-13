@@ -23,15 +23,21 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
   String type = 'Weights';
   String? primaryMuscle;
   String? secondaryMuscle;
-  String? equipment;
+  String? selectedEquipmentName; // Dropdown shows name
+  String? selectedEquipmentId; // Save ID
   String importance = 'Medium';
   List<String> relatedExercises = [];
   String instructions = '';
   String videoUrl = '';
   File? _image;
 
+  // NEW: For muscle distribution
+  int? primaryPercent;
+  int? secondaryPercent;
+
   List<String> muscleList = ['None'];
-  List<String> equipmentList = ['None'];
+  List<String> equipmentNames = ['None']; // For dropdown
+  Map<String, String> equipmentNameToId = {}; // Name -> ID map
   List<String> exerciseNames = ['None'];
   bool isLoading = true;
 
@@ -47,7 +53,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
   Future<void> _loadData() async {
     await Future.wait([
       _loadMuscles(),
-      _loadEquipment(),
+      _loadEquipment(), // Updated to load IDs
       _loadExerciseNames(),
     ]);
     setState(() => isLoading = false);
@@ -59,10 +65,20 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
     setState(() => muscleList = ['None', ...names]..sort());
   }
 
+  // UPDATED: Load equipment names and map to IDs
   Future<void> _loadEquipment() async {
     final snap = await FirebaseFirestore.instance.collection('equipment').get();
-    final names = snap.docs.map((doc) => doc['name'] as String).toList();
-    setState(() => equipmentList = ['None', ...names]..sort());
+    final names = <String>[];
+    final nameToId = <String, String>{};
+    for (var doc in snap.docs) {
+      final name = doc['name'] as String;
+      names.add(name);
+      nameToId[name] = doc.id;
+    }
+    setState(() {
+      equipmentNames = ['None', ...names]..sort();
+      equipmentNameToId = nameToId;
+    });
   }
 
   Future<void> _loadExerciseNames() async {
@@ -104,6 +120,64 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
         lower.contains('.mov');
   }
 
+  // NEW: Show popup for primary muscle percentage
+  Future<int?> _showPercentDialog() async {
+    final dialogKey = GlobalKey<FormState>();
+    String input = '80';
+
+    return await showDialog<int>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          title: const Text('Primary Muscle Percentage',
+              style: TextStyle(color: Colors.white)),
+          content: Form(
+            key: dialogKey,
+            child: TextFormField(
+              initialValue: '80',
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Percentage (1-99)',
+                labelStyle: const TextStyle(color: Colors.white70),
+                filled: true,
+                fillColor: const Color(0xFF2C2C2E),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              validator: (val) {
+                final p = int.tryParse(val ?? '');
+                if (p == null || p < 1 || p > 99)
+                  return 'Enter a value between 1 and 99';
+                return null;
+              },
+              onSaved: (val) => input = val!,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.orange)),
+            ),
+            TextButton(
+              onPressed: () {
+                if (dialogKey.currentState!.validate()) {
+                  dialogKey.currentState!.save();
+                  Navigator.pop(ctx, int.parse(input));
+                }
+              },
+              child: const Text('Save', style: TextStyle(color: Colors.orange)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _saveExercise() async {
     if (!_formKey.currentState!.validate() || user == null) return;
 
@@ -123,19 +197,38 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
 
     final imageUrl = await _uploadImage();
 
+    // NEW: Build muscles list and distribution list
     List<String> muscles = [];
+    List<int> distribution = [];
+
     if (primaryMuscle != null && primaryMuscle != 'None') {
       muscles.add(primaryMuscle!);
+      distribution
+          .add(primaryPercent ?? 80); // Fallback, though dialog enforces
     }
     if (secondaryMuscle != null && secondaryMuscle != 'None') {
       muscles.add(secondaryMuscle!);
+      distribution.add(100 - distribution[0]);
+    } else if (muscles.isNotEmpty) {
+      // If no secondary, set primary to 100% for full coverage
+      distribution[0] = 100;
+    }
+
+    // UPDATED: Save equipment as list of IDs
+    List<String> equipmentIds = [];
+    if (selectedEquipmentName != null && selectedEquipmentName != 'None') {
+      selectedEquipmentId = equipmentNameToId[selectedEquipmentName];
+      if (selectedEquipmentId != null) {
+        equipmentIds.add(selectedEquipmentId!);
+      }
     }
 
     final customExercise = {
       'name': name.trim(),
       'type': type,
       'muscles': muscles,
-      'equipment': equipment == 'None' || equipment == null ? [] : [equipment!],
+      'muscleDistribution': distribution,
+      'equipment': equipmentIds,
       'importance': importance,
       'relatedExercises': relatedExercises.where((e) => e != 'None').toList(),
       'instructions': instructions.trim(),
@@ -266,11 +359,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                       dropdownColor: const Color(0xFF1C1C1E),
                       items: [
                         'Weights',
-                        'Bodyweight',
                         'Cardio',
-                        'Time',
-                        'Distance'
-                      ]
+                        'Bodyweight'
+                      ] // Example types, adjust as needed
                           .map((t) => DropdownMenuItem(
                               value: t,
                               child: Text(t,
@@ -280,11 +371,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Primary Muscle
+                    // Primary Muscle — NEW: onChanged with popup
                     DropdownButtonFormField<String>(
                       value: primaryMuscle,
-                      hint: const Text("Primary Muscle",
-                          style: TextStyle(color: Colors.white70)),
                       decoration: InputDecoration(
                         labelText: "Primary Muscle",
                         filled: true,
@@ -301,11 +390,20 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                               child: Text(m,
                                   style: const TextStyle(color: Colors.white))))
                           .toList(),
-                      onChanged: (val) => setState(() => primaryMuscle = val),
+                      onChanged: (val) async {
+                        setState(() => primaryMuscle = val);
+                        if (val == null || val == 'None') return;
+                        final percent = await _showPercentDialog();
+                        if (percent == null) {
+                          setState(() => primaryMuscle = null);
+                        } else {
+                          setState(() => primaryPercent = percent);
+                        }
+                      },
                     ),
                     const SizedBox(height: 16),
 
-                    // Secondary Muscle
+                    // Secondary Muscle — NEW: onChanged with auto-calc
                     DropdownButtonFormField<String>(
                       value: secondaryMuscle,
                       hint: const Text("Secondary Muscle",
@@ -326,13 +424,35 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                               child: Text(m,
                                   style: const TextStyle(color: Colors.white))))
                           .toList(),
-                      onChanged: (val) => setState(() => secondaryMuscle = val),
+                      onChanged: (val) {
+                        if (val == null || val == 'None') {
+                          setState(() {
+                            secondaryMuscle = null;
+                            secondaryPercent = null;
+                          });
+                          return;
+                        }
+                        if (primaryMuscle == null ||
+                            primaryMuscle == 'None' ||
+                            primaryPercent == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'Please select and set percentage for primary muscle first.')),
+                          );
+                          return;
+                        }
+                        setState(() {
+                          secondaryMuscle = val;
+                          secondaryPercent = 100 - primaryPercent!;
+                        });
+                      },
                     ),
                     const SizedBox(height: 16),
 
-                    // Equipment
+                    // Equipment — UPDATED: onChanged sets name and ID
                     DropdownButtonFormField<String>(
-                      value: equipment,
+                      value: selectedEquipmentName,
                       hint: const Text("Equipment",
                           style: TextStyle(color: Colors.white70)),
                       decoration: InputDecoration(
@@ -345,13 +465,14 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
                         ),
                       ),
                       dropdownColor: const Color(0xFF1C1C1E),
-                      items: equipmentList
+                      items: equipmentNames
                           .map((e) => DropdownMenuItem(
                               value: e,
                               child: Text(e,
                                   style: const TextStyle(color: Colors.white))))
                           .toList(),
-                      onChanged: (val) => setState(() => equipment = val),
+                      onChanged: (val) =>
+                          setState(() => selectedEquipmentName = val),
                     ),
                     const SizedBox(height: 16),
 

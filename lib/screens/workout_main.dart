@@ -38,8 +38,10 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
   late List<Map<String, dynamic>> currentExercises;
   bool isPublic = false;
 
-  /// Stable unique identifier for every list item.
   int _uniqueIdCounter = 0;
+
+  // Dynamic muscle data WITH image URLs
+  List<Map<String, dynamic>> _muscleTargets = [];
 
   // -----------------------------------------------------------------
   //  LIFECYCLE
@@ -50,7 +52,7 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     currentExercises = widget.exercises;
     _checkWorkoutStatus();
     _loadPublicStatus();
-    _loadExercisesWithCustomSupport(); // ONE-TIME load
+    _loadExercisesWithCustomSupport(); // ONE-TIME load + muscle images
   }
 
   @override
@@ -161,7 +163,7 @@ https://ironcoach.app
   }
 
   // -----------------------------------------------------------------
-  //  LOGGED-SETS COUNT – **cached per exercise**
+  //  LOGGED-SETS COUNT
   // -----------------------------------------------------------------
   Future<int> _getLoggedSetsCount(String exerciseDocId) async {
     if (exerciseDocId == 'unknown') return 0;
@@ -175,7 +177,7 @@ https://ironcoach.app
   }
 
   // -----------------------------------------------------------------
-  //  TOTALS – uses cached IDs
+  //  TOTALS
   // -----------------------------------------------------------------
   Future<void> _calculateTotals() async {
     int totalCal = 0;
@@ -230,7 +232,6 @@ https://ironcoach.app
         .doc(widget.workout['id'])
         .set({'endTime': now, 'completedAt': now}, SetOptions(merge: true));
 
-    // clean empty exercises
     final workoutDoc = await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workout['id'])
@@ -264,13 +265,13 @@ https://ironcoach.app
     );
 
     if (result == true) {
-      await _loadExercisesWithCustomSupport();
+      await _loadExercisesWithCustomSupport(); // <-- This was missing or not awaited!
       await _calculateTotals();
     }
   }
 
   // -----------------------------------------------------------------
-  //  LOAD EXERCISES – **single source of truth**
+  //  LOAD EXERCISES + MUSCLE IMAGES (ONE-TIME)
   // -----------------------------------------------------------------
   Future<void> _loadExercisesWithCustomSupport() async {
     _uniqueIdCounter = 0;
@@ -284,27 +285,40 @@ https://ironcoach.app
     final List<dynamic> exerciseIds = workoutDoc.data()!['exerciseIds'] ?? [];
     final List<Map<String, dynamic>> loaded = [];
 
+    // Aggregates total % contribution per muscle across ALL exercises
+    final Map<String, double> muscleMap = {};
+
     for (String id in exerciseIds) {
-      // ---- OFFICIAL ----
+      // -------------------------- OFFICIAL EXERCISE --------------------------
       final official = await FirebaseFirestore.instance
           .collection('exercises')
           .doc(id)
           .get();
 
       if (official.exists) {
+        final data = official.data()!;
+
         loaded.add({
-          'exerciseDocId': id, // <-- **real ID**
+          'exerciseDocId': id,
           'isCustom': false,
-          ...official.data()!,
+          ...data,
           'sets': 4,
           'reps': '10-12',
           'weight': '20',
           'uniqueId': _uniqueIdCounter++,
         });
+
+        // === UNIFIED: Handle both Map and List formats ===
+        _aggregateMuscleDistribution(
+          muscleMap: muscleMap,
+          muscles: data['muscles'],
+          distribution: data['muscleDistribution'],
+        );
+
         continue;
       }
 
-      // ---- CUSTOM ----
+      // -------------------------- CUSTOM EXERCISE --------------------------
       final custom = await FirebaseFirestore.instance
           .collection('exercises_custom')
           .doc(id)
@@ -315,6 +329,7 @@ https://ironcoach.app
         final isOwner =
             cData['userId'] == FirebaseAuth.instance.currentUser?.uid;
         final isPublic = cData['isPublic'] == true;
+
         if (isOwner || isPublic) {
           loaded.add({
             'exerciseDocId': id,
@@ -325,11 +340,115 @@ https://ironcoach.app
             'weight': '20',
             'uniqueId': _uniqueIdCounter++,
           });
+
+          // === UNIFIED: Same logic for custom ===
+          _aggregateMuscleDistribution(
+            muscleMap: muscleMap,
+            muscles: cData['muscles'],
+            distribution: cData['muscleDistribution'],
+          );
         }
       }
     }
 
-    if (mounted) setState(() => currentExercises = loaded);
+    // -------------------------- CALCULATE TOP-3 MUSCLES --------------------------
+    final total = muscleMap.values.fold<double>(0.0, (a, b) => a + b);
+    final sorted = muscleMap.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final List<Map<String, dynamic>> targets = [];
+    for (final entry in sorted.take(3)) {
+      final percent = total > 0 ? (entry.value / total * 100).round() : 0;
+      final imageUrl = await _getMuscleImageUrl(entry.key);
+
+      targets.add({
+        'name': entry.key,
+        'percent': percent,
+        'color': _getMuscleColor(entry.key),
+        'imageUrl': imageUrl,
+      });
+    }
+
+    if (mounted) {
+      setState(() {
+        _muscleTargets = targets;
+        currentExercises = loaded;
+      });
+    }
+  }
+
+  // -------------------------- HELPER: Unified Aggregation --------------------------
+  void _aggregateMuscleDistribution({
+    required Map<String, double> muscleMap,
+    required dynamic muscles,
+    required dynamic distribution,
+  }) {
+    // Handle List<String> + List<int/double>
+    if (muscles is List && distribution is List) {
+      final muscleList = muscles.cast<String>();
+      for (int i = 0; i < muscleList.length && i < distribution.length; i++) {
+        final muscle = muscleList[i];
+        final percent =
+            (distribution[i] is num) ? distribution[i].toDouble() : 0.0;
+        muscleMap[muscle] = (muscleMap[muscle] ?? 0) + percent;
+      }
+      return;
+    }
+
+    // Fallback: Handle old Map<String, num> format (for legacy official exercises)
+    if (distribution is Map<String, dynamic>) {
+      distribution.forEach((muscle, percent) {
+        final p = (percent is num) ? percent.toDouble() : 0.0;
+        muscleMap[muscle] = (muscleMap[muscle] ?? 0) + p;
+      });
+    }
+  }
+
+  // -----------------------------------------------------------------
+  //  MUSCLE COLOR
+  // -----------------------------------------------------------------
+  Color _getMuscleColor(String muscle) {
+    switch (muscle.toLowerCase()) {
+      case 'chest':
+        return Colors.red;
+      case 'triceps':
+        return Colors.blue;
+      case 'quads':
+      case 'quadriceps':
+        return Colors.green;
+      case 'back':
+        return Colors.purple;
+      case 'biceps':
+        return Colors.orange;
+      case 'shoulders':
+        return Colors.yellow;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // -----------------------------------------------------------------
+  //  MUSCLE IMAGE FROM FIRESTORE
+  // -----------------------------------------------------------------
+  Future<String?> _getMuscleImageUrl(String muscleName) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('muscles')
+          .where('name', isEqualTo: muscleName)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return null;
+      final url = snap.docs.first['imageUrl'] as String?;
+      if (url == null || url.isEmpty) return null;
+      if (url.startsWith('gs://')) {
+        final path = url.replaceFirst(
+            'gs://weightlifting-tracker-a9834.firebasestorage.app/', '');
+        return 'https://firebasestorage.googleapis.com/v0/b/weightlifting-tracker-a9834.appspot.com/o/$path?alt=media';
+      }
+      return url;
+    } catch (e) {
+      return null;
+    }
   }
 
   // -----------------------------------------------------------------
@@ -355,7 +474,7 @@ https://ironcoach.app
       );
 
   // -----------------------------------------------------------------
-  //  SAFE IMAGE – handles file:// URLs
+  //  SAFE IMAGE – blocks file://
   // -----------------------------------------------------------------
   static const _ImagePlaceholder = SizedBox(
     width: 90,
@@ -427,7 +546,7 @@ https://ironcoach.app
   }
 
   // -----------------------------------------------------------------
-  //  EXERCISE CARD – uses cached logged-count
+  //  EXERCISE CARD
   // -----------------------------------------------------------------
   Widget _buildExerciseCard(Map<String, dynamic> ex, int index) {
     final String docId = ex['exerciseDocId'] as String? ?? 'unknown';
@@ -447,7 +566,7 @@ https://ironcoach.app
 
         return GestureDetector(
           onTap: () async {
-            if (!isWorkoutStarted) _startWorkout();
+            if (!isWorkoutStarted) _startWorkout(); // FIXED: was 꼼!
             await Navigator.push(
               context,
               MaterialPageRoute(
@@ -587,7 +706,7 @@ https://ironcoach.app
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Coach Card (demo)
+                // Coach Card
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -639,7 +758,7 @@ https://ironcoach.app
                 ),
                 const SizedBox(height: 20),
 
-                // Target muscles (demo)
+                // Target Muscles - DYNAMIC (NO FutureBuilder)
                 const Text("Target Muscles",
                     style: TextStyle(
                         color: Colors.white,
@@ -648,16 +767,18 @@ https://ironcoach.app
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 70,
-                  child: ListView(
+                  child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    children: const [
-                      MuscleTargetChip(
-                          name: "Chest", percent: 100, color: Colors.red),
-                      MuscleTargetChip(
-                          name: "Triceps", percent: 75, color: Colors.blue),
-                      MuscleTargetChip(
-                          name: "Quads", percent: 65, color: Colors.green),
-                    ],
+                    itemCount: _muscleTargets.length,
+                    itemBuilder: (context, i) {
+                      final m = _muscleTargets[i];
+                      return MuscleTargetChip(
+                        name: m['name'],
+                        percent: m['percent'],
+                        color: m['color'],
+                        imageUrl: m['imageUrl'],
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -816,18 +937,21 @@ https://ironcoach.app
 }
 
 // ---------------------------------------------------------------------
-//  MUSCLE CHIP (demo)
+//  DYNAMIC MUSCLE CHIP (NO FutureBuilder)
 // ---------------------------------------------------------------------
 class MuscleTargetChip extends StatelessWidget {
   final String name;
   final int percent;
   final Color color;
+  final String? imageUrl;
 
-  const MuscleTargetChip(
-      {super.key,
-      required this.name,
-      required this.percent,
-      required this.color});
+  const MuscleTargetChip({
+    super.key,
+    required this.name,
+    required this.percent,
+    required this.color,
+    this.imageUrl,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -840,7 +964,19 @@ class MuscleTargetChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 40, height: 40, color: Colors.grey),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: imageUrl != null
+                ? Image.network(
+                    imageUrl!,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        Container(width: 40, height: 40, color: Colors.grey),
+                  )
+                : Container(width: 40, height: 40, color: Colors.grey),
+          ),
           const SizedBox(width: 8),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
