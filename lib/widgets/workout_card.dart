@@ -11,163 +11,289 @@ class WorkoutCard extends StatefulWidget {
 
 class _WorkoutCardState extends State<WorkoutCard> {
   bool _isTomorrow = false;
+  bool _isLoading = false;
+
   Map<String, dynamic>? _workout;
   List<Map<String, dynamic>> _exercises = [];
-  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadWorkout();
   }
 
-  void _navigateToWorkoutMain() {
+  void _navigateToWorkoutMain(
+      Map<String, dynamic> workout, List<Map<String, dynamic>> exercises) {
     Navigator.pushNamed(context, '/workout_main', arguments: {
-      'workout': _workout!,
-      'exercises': _exercises,
+      'workout': workout,
+      'exercises': exercises,
+    }).then((_) {
+      setState(() {});
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_workout == null) return _buildEmptyCard();
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final queryDate = _isTomorrow
+        ? DateTime.now()
+            .add(const Duration(days: 1))
+            .toIso8601String()
+            .split('T')[0]
+        : DateTime.now().toIso8601String().split('T')[0];
 
-    final muscleMap = <String, double>{};
-    for (var ex in _exercises) {
-      final muscles =
-          ex['muscles'] is List ? ex['muscles'] as List : <dynamic>[];
-      final percentages = ex['muscleDistribution'] is List
-          ? ex['muscleDistribution'] as List
-          : <dynamic>[];
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('workouts')
+          .where('uid', isEqualTo: uid)
+          .where('date', isEqualTo: queryDate)
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(
+              child: CircularProgressIndicator(color: Colors.orange));
+        }
 
-      for (int i = 0; i < muscles.length && i < percentages.length; i++) {
-        final name = muscles[i]?.toString() ?? 'Unknown';
-        final percent = (percentages[i] as num?)?.toDouble() ?? 0.0;
-        muscleMap[name] = (muscleMap[name] ?? 0) + percent;
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return _buildEmptyCard();
+        }
+
+        final doc = snap.data!.docs.first;
+        final workoutData = doc.data() as Map<String, dynamic>;
+        workoutData['id'] = doc.id;
+
+        // SAFE PARSING: exerciseIds
+        List<String> ids = [];
+        final rawIds = workoutData['exerciseIds'];
+        if (rawIds is List) {
+          ids = rawIds.whereType<String>().toList();
+        } else if (rawIds is String && rawIds.trim().isNotEmpty) {
+          ids = rawIds
+              .split(',')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+        }
+
+        if (ids.isEmpty) {
+          return _buildEmptyCard();
+        }
+
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: _loadExercises(ids),
+          builder: (context, exSnap) {
+            if (exSnap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                  child: CircularProgressIndicator(color: Colors.orange));
+            }
+
+            final exercises = exSnap.data ?? [];
+
+            // MUSCLE DISTRIBUTION — FULLY SAFE
+            final muscleMap = <String, double>{};
+            for (var ex in exercises) {
+              // SAFE: muscles
+              List<String> muscles = [];
+              final rawMuscles = ex['muscles'];
+              if (rawMuscles is List) {
+                muscles = rawMuscles.whereType<String>().toList();
+              } else if (rawMuscles is String && rawMuscles.trim().isNotEmpty) {
+                muscles = rawMuscles
+                    .split(',')
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .toList();
+              }
+
+              // SAFE: muscleDistribution
+              List<double> percentages = [];
+              final rawPerc = ex['muscleDistribution'];
+              if (rawPerc is List) {
+                percentages =
+                    rawPerc.whereType<num>().map((n) => n.toDouble()).toList();
+              } else if (rawPerc is String && rawPerc.trim().isNotEmpty) {
+                percentages = rawPerc
+                    .split(',')
+                    .map((s) => double.tryParse(s.trim()) ?? 0.0)
+                    .toList();
+              }
+
+              for (int i = 0;
+                  i < muscles.length && i < percentages.length;
+                  i++) {
+                final name = muscles[i];
+                final percent = percentages[i];
+                muscleMap[name] = (muscleMap[name] ?? 0) + percent;
+              }
+            }
+
+            final total = muscleMap.values.fold(0.0, (a, b) => a + b) > 0
+                ? muscleMap.values.fold(0.0, (a, b) => a + b)
+                : 1.0;
+            final sorted = muscleMap.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value));
+            final muscleText = sorted
+                .take(4)
+                .map((e) =>
+                    "${e.key} ${((e.value / total) * 100).toStringAsFixed(0)}%")
+                .join(', ');
+
+            return InkWell(
+              onTap: () => _navigateToWorkoutMain(workoutData, exercises),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1C1C1E),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.orange.withOpacity(0.2),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8))
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isTomorrow ? "Tomorrow's Workout" : "Your Next Workout",
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Images
+                    GestureDetector(
+                      onTap: () =>
+                          _navigateToWorkoutMain(workoutData, exercises),
+                      child: SizedBox(
+                        height: 100,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: exercises.length,
+                          itemBuilder: (ctx, i) {
+                            final ex = exercises[i];
+                            return Container(
+                              margin: const EdgeInsets.only(right: 12),
+                              width: 100,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                image: DecorationImage(
+                                  image: NetworkImage(ex['imageUrl'] ??
+                                      'https://i.imgur.com/5K8zK5P.png'),
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    if (muscleText.isNotEmpty)
+                      Text(muscleText,
+                          style: const TextStyle(
+                              color: Colors.orange,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+
+                    Text(
+                        "${workoutData['duration']} min • ${exercises.length} exercises",
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 16)),
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        CircleAvatar(
+                            radius: 12,
+                            backgroundImage:
+                                NetworkImage(workoutData['coachPhoto'] ?? '')),
+                        const SizedBox(width: 8),
+                        Text(workoutData['coach'] ?? 'No Coach',
+                            style: const TextStyle(color: Colors.orange)),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.edit,
+                              color: Colors.orange, size: 20),
+                          onPressed: () =>
+                              _navigateToWorkoutMain(workoutData, exercises),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Buttons
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 8, horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2A2A2A),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _navBtn(Icons.refresh, "Regenerate",
+                              () => _regenerateToday(workoutData['id'])),
+                          _navBtn(
+                              Icons.skip_next,
+                              _isTomorrow ? "Previous" : "Next",
+                              () => _toggleDay()),
+                          _navBtn(
+                              Icons.edit_note,
+                              "Edit",
+                              () => _navigateToWorkoutMain(
+                                  workoutData, exercises)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _loadExercises(List<String> ids) async {
+    if (ids.isEmpty) return [];
+
+    final exDocs = await Future.wait(
+      ids.map((id) =>
+          FirebaseFirestore.instance.collection('exercises').doc(id).get()),
+    );
+
+    final missingIds = <String>[];
+    final exercises = <Map<String, dynamic>>[];
+    for (int i = 0; i < exDocs.length; i++) {
+      if (exDocs[i].exists) {
+        exercises.add(exDocs[i].data()!);
+      } else {
+        missingIds.add(ids[i]);
       }
     }
 
-    final total = muscleMap.values.isEmpty
-        ? 1.0
-        : muscleMap.values.reduce((a, b) => a + b);
-    final sorted = muscleMap.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final muscleText = sorted
-        .take(4)
-        .map((e) => "${e.key} ${((e.value / total) * 100).toStringAsFixed(0)}%")
-        .join(', ');
+    if (missingIds.isNotEmpty) {
+      final customDocs = await Future.wait(
+        missingIds.map((id) => FirebaseFirestore.instance
+            .collection('exercises_custom')
+            .doc(id)
+            .get()),
+      );
+      exercises.addAll(customDocs.where((d) => d.exists).map((d) => d.data()!));
+    }
 
-    return InkWell(
-      onTap: _navigateToWorkoutMain, // FULL CARD TAP
-      child: Container(
-        margin: const EdgeInsets.symmetric(
-            horizontal: 0, vertical: 8), //horiz size change otto
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.orange.withOpacity(0.2),
-                blurRadius: 20,
-                offset: const Offset(0, 8))
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _isTomorrow ? "Tomorrow's Workout" : "Your Next Workout",
-              style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-            ),
-            const SizedBox(height: 12),
-
-            // IMAGES — NOW TAPPABLE
-            GestureDetector(
-              onTap: _navigateToWorkoutMain,
-              child: SizedBox(
-                height: 100,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _exercises.length,
-                  itemBuilder: (ctx, i) {
-                    final ex = _exercises[i];
-                    return Container(
-                      margin: const EdgeInsets.only(right: 12),
-                      width: 100,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        image: DecorationImage(
-                          image: NetworkImage(ex['imageUrl'] ??
-                              'https://i.imgur.com/5K8zK5P.png'),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            if (muscleText.isNotEmpty)
-              Text(muscleText,
-                  style: const TextStyle(
-                      color: Colors.orange,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-
-            Text(
-                "${_workout!['duration']} min • ${_exercises.length} exercises",
-                style: const TextStyle(color: Colors.white70, fontSize: 16)),
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                CircleAvatar(
-                    radius: 12,
-                    backgroundImage:
-                        NetworkImage(_workout!['coachPhoto'] ?? '')),
-                const SizedBox(width: 8),
-                Text(_workout!['coach'] ?? 'No Coach',
-                    style: const TextStyle(color: Colors.orange)),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.edit, color: Colors.orange, size: 20),
-                  onPressed: _navigateToWorkoutMain,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // BUTTONS FRAME
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  vertical: 8, horizontal: 10), // Tighter
-              decoration: BoxDecoration(
-                color: const Color(0xFF2A2A2A),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _navBtn(
-                      Icons.refresh, "Regenerate", () => _regenerateToday()),
-                  _navBtn(Icons.skip_next, _isTomorrow ? "Previous" : "Next",
-                      () => _toggleDay()),
-                  _navBtn(Icons.edit_note, "Edit", _navigateToWorkoutMain),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return exercises;
   }
 
   Widget _navBtn(IconData icon, String label, VoidCallback onTap) {
@@ -188,9 +314,8 @@ class _WorkoutCardState extends State<WorkoutCard> {
           ),
         ),
         style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          minimumSize: const Size(50, 44),
-        ),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(50, 44)),
       ),
     );
   }
@@ -260,24 +385,18 @@ class _WorkoutCardState extends State<WorkoutCard> {
     );
   }
 
-  // REGENERATE TODAY
-  Future<void> _regenerateToday() async {
-    if (_workout == null) return;
-    final docId = _workout!['id'];
+  Future<void> _regenerateToday(String workoutId) async {
     final newIds = await _getRandomExerciseIds();
     await FirebaseFirestore.instance
         .collection('workouts')
-        .doc(docId)
+        .doc(workoutId)
         .update({'exerciseIds': newIds});
-    await _loadWorkout();
   }
 
-  // TOGGLE + AUTO-GENERATE TOMORROW
   Future<void> _toggleDay() async {
     setState(() => _isTomorrow = !_isTomorrow);
     final exists = await _checkWorkoutExists();
     if (!exists) await _generateTomorrowWorkout();
-    await _loadWorkout();
   }
 
   Future<bool> _checkWorkoutExists() async {
@@ -359,85 +478,10 @@ class _WorkoutCardState extends State<WorkoutCard> {
       await userRef.update({'freeWorkoutsUsed': used + 1});
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text("Workout Generated!"), backgroundColor: Colors.green));
-      await _loadWorkout();
     } catch (e) {
       print("ERROR: $e");
     } finally {
       setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _loadWorkout() async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final today = DateTime.now().toIso8601String().split('T')[0];
-    final queryDate = _isTomorrow
-        ? DateTime.now()
-            .add(const Duration(days: 1))
-            .toIso8601String()
-            .split('T')[0]
-        : today;
-
-    final snapshot = await FirebaseFirestore.instance
-        .collection('workouts')
-        .where('uid', isEqualTo: uid)
-        .where('date', isEqualTo: queryDate)
-        .orderBy('createdAt', descending: true)
-        .limit(1)
-        .get();
-
-    if (snapshot.docs.isEmpty) {
-      setState(() => _workout = null);
-      return;
-    }
-
-    final doc = snapshot.docs.first;
-    final data = doc.data() as Map<String, dynamic>;
-    data['id'] = doc.id; // Save ID for regenerate
-
-    // === SAFE PARSING OF exerciseIds ===
-    final rawExerciseIds = data['exerciseIds'];
-    List<String> ids = [];
-
-    if (rawExerciseIds is List) {
-      ids = rawExerciseIds.whereType<String>().toList();
-    } else if (rawExerciseIds is String && rawExerciseIds.trim().isNotEmpty) {
-      // Handle corrupted data: maybe it's a single ID or comma-separated
-      ids = rawExerciseIds
-          .split(',')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (ids.length == 1 && ids.first.isEmpty) ids = [];
-    }
-    // If null or anything else → ids stays empty
-
-    setState(() {
-      _workout = data;
-      _exercises = [];
-    });
-
-    if (ids.isEmpty) {
-      setState(() => _exercises = []);
-      return;
-    }
-
-    try {
-      final exDocs = await Future.wait(
-        ids.map((id) =>
-            FirebaseFirestore.instance.collection('exercises').doc(id).get()),
-      );
-
-      final exercises = exDocs
-          .where((d) => d.exists)
-          .map((d) => d.data() as Map<String, dynamic>)
-          .toList();
-
-      if (mounted) {
-        setState(() => _exercises = exercises);
-      }
-    } catch (e) {
-      debugPrint('Error loading exercises: $e');
-      if (mounted) setState(() => _exercises = []);
     }
   }
 }
