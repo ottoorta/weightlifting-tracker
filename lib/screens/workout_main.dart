@@ -462,9 +462,9 @@ https://ironcoach.app
         '${(elapsedDuration.inMinutes % 60).toString().padLeft(2, '0')}:'
         '${(elapsedDuration.inSeconds % 60).toString().padLeft(2, '0')}';
 
-    Color btnColor = isWorkoutCompleted ? Colors.green : Colors.orange;
+    Color btnColor = isWorkoutCompleted ? Colors.grey : Colors.orange;
     String btnText = isWorkoutCompleted
-        ? 'FINISH WORKOUT'
+        ? 'WORKOUT COMPLETED'
         : isWorkoutStarted
             ? 'FINISH WORKOUT'
             : 'START WORKOUT';

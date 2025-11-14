@@ -63,6 +63,11 @@ class _WorkoutCardState extends State<WorkoutCard> {
         final workoutData = doc.data() as Map<String, dynamic>;
         workoutData['id'] = doc.id;
 
+        // === NEW: HIDE IF COMPLETED ===
+        if (workoutData['completedAt'] != null) {
+          return _buildEmptyCard();
+        }
+
         // SAFE PARSING: exerciseIds
         List<String> ids = [];
         final rawIds = workoutData['exerciseIds'];
