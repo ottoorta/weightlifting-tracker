@@ -220,17 +220,11 @@ class _WorkoutCardState extends State<WorkoutCard> {
                         Text(workoutData['coach'] ?? 'No Coach',
                             style: const TextStyle(color: Colors.orange)),
                         const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.edit,
-                              color: Colors.orange, size: 20),
-                          onPressed: () =>
-                              _navigateToWorkoutMain(workoutData, exercises),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
 
-                    // Buttons
+                    // Buttons with separators
                     Container(
                       padding: const EdgeInsets.symmetric(
                           vertical: 8, horizontal: 10),
@@ -243,15 +237,35 @@ class _WorkoutCardState extends State<WorkoutCard> {
                         children: [
                           _navBtn(Icons.refresh, "Regenerate",
                               () => _regenerateToday(workoutData['id'])),
+                          const VerticalDivider(
+                            color: Colors.grey,
+                            thickness: 1,
+                            indent: 10,
+                            endIndent: 10,
+                          ),
                           _navBtn(
                               Icons.skip_next,
                               _isTomorrow ? "Previous" : "Next",
                               () => _toggleDay()),
+                          const VerticalDivider(
+                            color: Colors.grey,
+                            thickness: 1,
+                            indent: 10,
+                            endIndent: 10,
+                          ),
                           _navBtn(
                               Icons.edit_note,
                               "Edit",
                               () => _navigateToWorkoutMain(
                                   workoutData, exercises)),
+                          const VerticalDivider(
+                            color: Colors.grey,
+                            thickness: 1,
+                            indent: 10,
+                            endIndent: 10,
+                          ),
+                          _navBtn(
+                              Icons.add, "New", () => _createBlankWorkout()),
                         ],
                       ),
                     ),
@@ -298,23 +312,29 @@ class _WorkoutCardState extends State<WorkoutCard> {
 
   Widget _navBtn(IconData icon, String label, VoidCallback onTap) {
     return Expanded(
-      child: TextButton.icon(
+      child: TextButton(
         onPressed: onTap,
-        icon: Transform.rotate(
-          angle: _isTomorrow && icon == Icons.skip_next ? 3.14 : 0,
-          child: Icon(icon, color: Colors.white, size: 24),
-        ),
-        label: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            label,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-            maxLines: 1,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Transform.rotate(
+              angle: _isTomorrow && icon == Icons.skip_next ? 3.14 : 0,
+              child: Icon(icon, color: Colors.white, size: 24),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
         style: TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             minimumSize: const Size(50, 44)),
       ),
     );
@@ -517,12 +537,45 @@ class _WorkoutCardState extends State<WorkoutCard> {
     }
   }
 
+  // === NEW: CLEANUP INCOMPLETE WORKOUTS (FIXED) ===
+  Future<void> _cleanupIncompleteWorkouts() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final batch = FirebaseFirestore.instance.batch();
+    int deletedCount = 0;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('workouts')
+          .where('uid', isEqualTo: uid)
+          .get();
+
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        if (data['completedAt'] == null) {
+          batch.delete(doc.reference);
+          deletedCount++;
+        }
+      }
+
+      if (deletedCount > 0) {
+        await batch.commit();
+        debugPrint("Cleaned up $deletedCount incomplete workouts.");
+      }
+    } catch (e) {
+      debugPrint("Cleanup failed: $e");
+    }
+  }
+
   Future<void> _createBlankWorkout() async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
-    final uid = FirebaseAuth.instance.currentUser!.uid;
 
     try {
+      // STEP 1: Clean up old incomplete workouts
+      await _cleanupIncompleteWorkouts();
+
+      // STEP 2: Create new blank workout
+      final uid = FirebaseAuth.instance.currentUser!.uid;
       final date = DateTime.now().toIso8601String().split('T')[0];
       final docRef =
           await FirebaseFirestore.instance.collection('workouts').add({
