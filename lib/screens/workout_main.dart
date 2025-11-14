@@ -662,7 +662,9 @@ https://ironcoach.app
                           color: const Color(0xFF1C1C1E),
                           borderRadius: BorderRadius.circular(20)),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // IMAGE
                           if (image != null &&
                               image.isNotEmpty &&
                               image.startsWith('http'))
@@ -680,34 +682,53 @@ https://ironcoach.app
                               ),
                             ),
                           const SizedBox(width: 16),
+
+                          // TEXT COLUMN
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(name,
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold)),
+                                // NAME
+                                Text(
+                                  name,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold),
+                                ),
                                 const SizedBox(height: 4),
-                                Text('$sets sets • $reps reps • $weight kg',
-                                    style:
-                                        const TextStyle(color: Colors.white70)),
+
+                                // SETS • REPS • WEIGHT
+                                Text(
+                                  '$sets sets • $reps reps • $weight kg',
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
                                 const SizedBox(height: 4),
-                                Text(muscles,
-                                    style:
-                                        const TextStyle(color: Colors.orange)),
+
+                                // LOGGED SETS
+                                FutureBuilder<int>(
+                                  future: _getLoggedSetsCount(docId),
+                                  builder: (ctx, snap) {
+                                    final logged = snap.data ?? 0;
+                                    return Text(
+                                      '$logged/$sets sets logged',
+                                      style: const TextStyle(
+                                          color: Colors.white70, fontSize: 13),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 4),
+
+                                // MUSCLES
+                                Text(
+                                  muscles,
+                                  style: const TextStyle(
+                                      color: Colors.orange, fontSize: 13),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ],
                             ),
-                          ),
-                          FutureBuilder<int>(
-                            future: _getLoggedSetsCount(docId),
-                            builder: (ctx, snap) {
-                              final logged = snap.data ?? 0;
-                              return Text('$logged/$sets sets logged',
-                                  style:
-                                      const TextStyle(color: Colors.white70));
-                            },
                           ),
                         ],
                       ),
@@ -819,7 +840,7 @@ https://ironcoach.app
                   );
                 }).toList(),
 
-                const SizedBox(height: 32),
+                const SizedBox(height: 5),
 
                 // SHARE
                 GestureDetector(
@@ -834,7 +855,7 @@ https://ironcoach.app
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
 
                 // PUBLIC
                 Row(
@@ -854,7 +875,7 @@ https://ironcoach.app
                   ],
                 ),
 
-                const SizedBox(height: 40),
+                const SizedBox(height: 100),
               ],
             ),
           ),
