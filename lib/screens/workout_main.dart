@@ -50,7 +50,6 @@ class _WorkoutMainScreenState extends State<WorkoutMainScreen> {
     _checkWorkoutStatus();
     _loadPublicStatus();
     _calculateMuscleTargets();
-    // Load full exercises to ensure 'exerciseDocId' is set
     _loadExercisesWithCustomSupport();
   }
 
@@ -286,7 +285,34 @@ https://ironcoach.app
     if (mounted) {
       setState(() => currentExercises = loaded);
       await _calculateMuscleTargets();
+      await _updateDuration(); // <-- NEW: Update duration after load
     }
+  }
+
+  // === DURATION CALCULATION & UPDATE ===
+  Future<void> _updateDuration() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final userSnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+
+    final defaultRestTime =
+        userSnap.data()?['defaultRestTime'] as int? ?? 90; // seconds
+    final restMinutes = defaultRestTime / 60.0;
+    const liftMinutesPerSet = 2.0;
+    const setsPerExercise = 4;
+
+    final perExerciseMinutes =
+        (setsPerExercise * liftMinutesPerSet) + (setsPerExercise * restMinutes);
+    final totalMinutes = (currentExercises.length * perExerciseMinutes).round();
+
+    await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workout['id'])
+        .update({'duration': totalMinutes});
   }
 
   // MUSCLE TARGETS
@@ -408,6 +434,7 @@ https://ironcoach.app
 
               await _calculateTotals();
               await _calculateMuscleTargets();
+              await _updateDuration(); // <-- Recalculate duration on undo
 
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -736,6 +763,7 @@ https://ironcoach.app
                         debugPrint('No valid docId — skipping Firestore ops');
                         await _calculateTotals();
                         await _calculateMuscleTargets();
+                        await _updateDuration(); // <-- Recalculate on remove
                         _showUndoSnackBar(removed, index, docId);
                         return;
                       }
@@ -767,6 +795,7 @@ https://ironcoach.app
                         // === 6. Success ===
                         await _calculateTotals();
                         await _calculateMuscleTargets();
+                        await _updateDuration(); // <-- Recalculate duration
                         _showUndoSnackBar(removed, index, docId);
                       } catch (e, stackTrace) {
                         debugPrint('DELETE FAILED: $e\n$stackTrace');
@@ -775,6 +804,7 @@ https://ironcoach.app
                         setState(() => currentExercises.insert(index, removed));
                         await _calculateTotals();
                         await _calculateMuscleTargets();
+                        await _updateDuration(); // <-- Recalculate on rollback
 
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
