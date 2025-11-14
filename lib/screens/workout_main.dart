@@ -655,86 +655,109 @@ https://ironcoach.app
                       _calculateTotals();
                       _calculateMuscleTargets();
                     }),
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 20),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                          color: const Color(0xFF1C1C1E),
-                          borderRadius: BorderRadius.circular(20)),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // IMAGE
-                          if (image != null &&
-                              image.isNotEmpty &&
-                              image.startsWith('http'))
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.network(
-                                image,
-                                width: 80,
-                                height: 80,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                    color: Colors.grey,
-                                    child: const Icon(Icons.fitness_center,
-                                        color: Colors.white54)),
-                              ),
-                            ),
-                          const SizedBox(width: 16),
+                    child: FutureBuilder<int>(
+                      future: _getLoggedSetsCount(docId),
+                      builder: (ctx, snap) {
+                        final logged = snap.data ?? 0;
+                        final isCompleted = logged >= 1;
 
-                          // TEXT COLUMN
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // NAME
-                                Text(
-                                  name,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 4),
-
-                                // SETS • REPS • WEIGHT
-                                Text(
-                                  '$sets sets • $reps reps • $weight kg',
-                                  style: const TextStyle(color: Colors.white70),
-                                ),
-                                const SizedBox(height: 4),
-
-                                // LOGGED SETS
-                                FutureBuilder<int>(
-                                  future: _getLoggedSetsCount(docId),
-                                  builder: (ctx, snap) {
-                                    final logged = snap.data ?? 0;
-                                    return Text(
-                                      '$logged/$sets sets logged',
-                                      style: const TextStyle(
-                                          color: Colors.white70, fontSize: 13),
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 4),
-
-                                // MUSCLES
-                                Text(
-                                  muscles,
-                                  style: const TextStyle(
-                                      color: Colors.orange, fontSize: 13),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 20),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1C1C1E),
+                            // Orange overlay only if completed
+                            gradient: isCompleted
+                                ? const LinearGradient(
+                                    colors: [
+                                      Color(0xFF1C1C1E),
+                                      Color(0x33FF9800), // Orange 20%
+                                      Color(0x1AFF9800), // Orange 10%
+                                    ],
+                                    stops: [0.0, 0.7, 1.0],
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                  )
+                                : null,
+                            borderRadius: BorderRadius.circular(20),
                           ),
-                        ],
-                      ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // IMAGE
+                              if (image != null &&
+                                  image.isNotEmpty &&
+                                  image.startsWith('http'))
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(
+                                    image,
+                                    width: 80,
+                                    height: 80,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                        color: Colors.grey,
+                                        child: const Icon(Icons.fitness_center,
+                                            color: Colors.white54)),
+                                  ),
+                                ),
+                              const SizedBox(width: 16),
+
+                              // TEXT COLUMN
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // NAME
+                                    Text(
+                                      name,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+
+                                    // SETS • REPS • WEIGHT
+                                    Text(
+                                      '$sets sets • $reps reps • $weight kg',
+                                      style: const TextStyle(
+                                          color: Colors.white70),
+                                    ),
+                                    const SizedBox(height: 4),
+
+                                    // LOGGED SETS
+                                    Text(
+                                      '$logged/$sets sets logged',
+                                      style: TextStyle(
+                                        color: isCompleted
+                                            ? Colors.orange
+                                            : Colors.white70,
+                                        fontWeight: isCompleted
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+
+                                    // MUSCLES
+                                    Text(
+                                      muscles,
+                                      style: const TextStyle(
+                                          color: Colors.orange, fontSize: 13),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   );
-
                   if (isWorkoutCompleted) return card;
 
                   return Dismissible(
