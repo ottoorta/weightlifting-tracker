@@ -360,24 +360,56 @@ class _WorkoutCardState extends State<WorkoutCard> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(40, 0, 40, 40),
-            child: ElevatedButton.icon(
-              onPressed: _isLoading ? null : () => _generateFreeWorkout(),
-              icon: _isLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.auto_awesome, size: 28),
-              label: Text(_isLoading ? "Generating..." : "Get FREE Workout!",
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                minimumSize: const Size(double.infinity, 56),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
-              ),
+            child: Column(
+              children: [
+                ElevatedButton.icon(
+                  onPressed: _isLoading ? null : () => _generateFreeWorkout(),
+                  icon: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.auto_awesome, size: 28),
+                  label: Text(
+                      _isLoading ? "Generating..." : "Get FREE Workout!",
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 56),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _isLoading ? null : () => _createBlankWorkout(),
+                  icon: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.add, size: 28),
+                  label: Text(
+                    _isLoading ? "Creating..." : "Create Blank Workout",
+                    style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey[700],
+                    foregroundColor:
+                        Colors.white, // This forces icon + text to white
+                    minimumSize: const Size(double.infinity, 56),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30)),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -480,6 +512,46 @@ class _WorkoutCardState extends State<WorkoutCard> {
           content: Text("Workout Generated!"), backgroundColor: Colors.green));
     } catch (e) {
       print("ERROR: $e");
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _createBlankWorkout() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    try {
+      final date = DateTime.now().toIso8601String().split('T')[0];
+      final docRef =
+          await FirebaseFirestore.instance.collection('workouts').add({
+        'uid': uid,
+        'date': date,
+        'duration': 0,
+        'coach': 'No Coach',
+        'coachPhoto': '',
+        'exerciseIds': [],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      final workout = {
+        'id': docRef.id,
+        'date': date,
+        'duration': 0,
+        'coach': 'No Coach',
+        'coachPhoto': '',
+        'exerciseIds': [],
+      };
+
+      _navigateToWorkoutMain(workout, []);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Blank Workout Created!"),
+          backgroundColor: Colors.green));
+    } catch (e) {
+      print("ERROR: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to create blank workout")));
     } finally {
       setState(() => _isLoading = false);
     }
