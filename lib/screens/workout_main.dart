@@ -285,7 +285,7 @@ https://ironcoach.app
     if (mounted) {
       setState(() => currentExercises = loaded);
       await _calculateMuscleTargets();
-      await _updateDuration(); // <-- NEW: Update duration after load
+      await _updateDuration();
     }
   }
 
@@ -299,8 +299,7 @@ https://ironcoach.app
         .doc(user.uid)
         .get();
 
-    final defaultRestTime =
-        userSnap.data()?['defaultRestTime'] as int? ?? 90; // seconds
+    final defaultRestTime = userSnap.data()?['defaultRestTime'] as int? ?? 90;
     final restMinutes = defaultRestTime / 60.0;
     const liftMinutesPerSet = 2.0;
     const setsPerExercise = 4;
@@ -434,7 +433,7 @@ https://ironcoach.app
 
               await _calculateTotals();
               await _calculateMuscleTargets();
-              await _updateDuration(); // <-- Recalculate duration on undo
+              await _updateDuration();
 
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -550,72 +549,81 @@ https://ironcoach.app
                 ),
                 const SizedBox(height: 16),
 
-                // TARGET MUSCLES
-                const Text('Target Muscles',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 80,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _muscleTargets.length,
-                    itemBuilder: (ctx, idx) {
-                      final t = _muscleTargets[idx];
-                      final imageUrl = t['imageUrl']?.toString().trim();
-                      return Container(
-                        margin: const EdgeInsets.only(right: 12),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1C1C1E),
-                          borderRadius: BorderRadius.circular(16),
+                // TARGET MUSCLES (HIDDEN IF EMPTY)
+                if (currentExercises.isNotEmpty && _muscleTargets.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Target Muscles',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 80,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _muscleTargets.length,
+                          itemBuilder: (ctx, idx) {
+                            final t = _muscleTargets[idx];
+                            final imageUrl = t['imageUrl']?.toString().trim();
+                            return Container(
+                              margin: const EdgeInsets.only(right: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1C1C1E),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: (imageUrl != null &&
+                                            imageUrl.isNotEmpty &&
+                                            imageUrl.startsWith('http'))
+                                        ? Image.network(
+                                            imageUrl,
+                                            width: 40,
+                                            height: 40,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                Container(
+                                                    width: 40,
+                                                    height: 40,
+                                                    color: Colors.grey),
+                                          )
+                                        : Container(
+                                            width: 40,
+                                            height: 40,
+                                            color: Colors.grey,
+                                          ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(t['name'],
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13)),
+                                      Text("${t['percent']}%",
+                                          style: TextStyle(
+                                              color: t['color'],
+                                              fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: (imageUrl != null &&
-                                      imageUrl.isNotEmpty &&
-                                      imageUrl.startsWith('http'))
-                                  ? Image.network(
-                                      imageUrl,
-                                      width: 40,
-                                      height: 40,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                          width: 40,
-                                          height: 40,
-                                          color: Colors.grey),
-                                    )
-                                  : Container(
-                                      width: 40,
-                                      height: 40,
-                                      color: Colors.grey,
-                                    ),
-                            ),
-                            const SizedBox(width: 8),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(t['name'],
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 13)),
-                                Text("${t['percent']}%",
-                                    style: TextStyle(
-                                        color: t['color'],
-                                        fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                      ),
+                      const SizedBox(height: 24),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 24),
 
                 // STATS
                 Row(
@@ -629,239 +637,271 @@ https://ironcoach.app
                 const SizedBox(height: 24),
 
                 // EXERCISES LIST
-                ...currentExercises.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final ex = entry.value;
-                  final uid = ex['uniqueId'] as int;
-                  final docId = ex['exerciseDocId'] as String? ?? 'unknown';
-                  final image = ex['imageUrl'] as String?;
-                  final name = ex['name'] as String? ?? 'Exercise';
-                  final sets = ex['sets'] as int? ?? 4;
-                  final reps = ex['reps'] as String? ?? '10-12';
-                  final weight = ex['weight'] as String? ?? '20';
-                  final muscles = (ex['muscles'] as List?)?.join(', ') ?? '';
-
-                  final card = GestureDetector(
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      '/workout_exercise',
-                      arguments: {
-                        'workoutId': widget.workout['id'],
-                        'exercise': ex,
-                        'isWorkoutStarted': isWorkoutStarted,
-                        'isViewOnly': isWorkoutCompleted,
-                      },
-                    ).then((_) {
-                      _calculateTotals();
-                      _calculateMuscleTargets();
-                    }),
-                    child: FutureBuilder<int>(
-                      future: _getLoggedSetsCount(docId),
-                      builder: (ctx, snap) {
-                        final logged = snap.data ?? 0;
-                        final isCompleted = logged >= 1;
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 20),
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1C1C1E),
-                            // Orange overlay only if completed
-                            gradient: isCompleted
-                                ? const LinearGradient(
-                                    colors: [
-                                      Color(0xFF1C1C1E),
-                                      Color(0x33FF9800), // Orange 20%
-                                      Color(0x1AFF9800), // Orange 10%
-                                    ],
-                                    stops: [0.0, 0.7, 1.0],
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                  )
-                                : null,
-                            borderRadius: BorderRadius.circular(20),
+                if (currentExercises.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 60),
+                          const Text(
+                            "No exercises added yet",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // IMAGE
-                              if (image != null &&
-                                  image.isNotEmpty &&
-                                  image.startsWith('http'))
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    image,
-                                    width: 80,
-                                    height: 80,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => Container(
-                                        color: Colors.grey,
-                                        child: const Icon(Icons.fitness_center,
-                                            color: Colors.white54)),
+                          const SizedBox(height: 12),
+                          GestureDetector(
+                            onTap: _addExercises,
+                            child: RichText(
+                              text: TextSpan(
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 16),
+                                children: [
+                                  const TextSpan(text: "Tap "),
+                                  TextSpan(
+                                    text: "here",
+                                    style: const TextStyle(
+                                      color: Colors.orange,
+                                      fontWeight: FontWeight.bold,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                  const TextSpan(
+                                      text: " to start adding exercises"),
+                                ],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          const SizedBox(height: 120),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ...currentExercises.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final ex = entry.value;
+                    final uid = ex['uniqueId'] as int;
+                    final docId = ex['exerciseDocId'] as String? ?? 'unknown';
+                    final image = ex['imageUrl'] as String?;
+                    final name = ex['name'] as String? ?? 'Exercise';
+                    final sets = ex['sets'] as int? ?? 4;
+                    final reps = ex['reps'] as String? ?? '10-12';
+                    final weight = ex['weight'] as String? ?? '20';
+                    final muscles = (ex['muscles'] as List?)?.join(', ') ?? '';
+
+                    final card = GestureDetector(
+                      onTap: () => Navigator.pushNamed(
+                        context,
+                        '/workout_exercise',
+                        arguments: {
+                          'workoutId': widget.workout['id'],
+                          'exercise': ex,
+                          'isWorkoutStarted': isWorkoutStarted,
+                          'isViewOnly': isWorkoutCompleted,
+                        },
+                      ).then((_) {
+                        _calculateTotals();
+                        _calculateMuscleTargets();
+                      }),
+                      child: FutureBuilder<int>(
+                        future: _getLoggedSetsCount(docId),
+                        builder: (ctx, snap) {
+                          final logged = snap.data ?? 0;
+                          final isCompleted = logged >= sets;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 20),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1C1C1E),
+                              gradient: isCompleted
+                                  ? const LinearGradient(
+                                      colors: [
+                                        Color(0xFF1C1C1E),
+                                        Color(0x33FF9800),
+                                        Color(0x1AFF9800),
+                                      ],
+                                      stops: [0.0, 0.7, 1.0],
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                    )
+                                  : null,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (image != null &&
+                                    image.isNotEmpty &&
+                                    image.startsWith('http'))
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Image.network(
+                                      image,
+                                      width: 80,
+                                      height: 80,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                          color: Colors.grey,
+                                          child: const Icon(
+                                              Icons.fitness_center,
+                                              color: Colors.white54)),
+                                    ),
+                                  ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$sets sets • $reps reps • $weight kg',
+                                        style: const TextStyle(
+                                            color: Colors.white70),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$logged/$sets sets logged',
+                                        style: TextStyle(
+                                          color: isCompleted
+                                              ? Colors.orange
+                                              : Colors.white70,
+                                          fontWeight: isCompleted
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        muscles,
+                                        style: const TextStyle(
+                                            color: Colors.orange, fontSize: 13),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              const SizedBox(width: 16),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    );
 
-                              // TEXT COLUMN
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // NAME
-                                    Text(
-                                      name,
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                    const SizedBox(height: 4),
+                    if (isWorkoutCompleted) return card;
 
-                                    // SETS • REPS • WEIGHT
-                                    Text(
-                                      '$sets sets • $reps reps • $weight kg',
-                                      style: const TextStyle(
-                                          color: Colors.white70),
-                                    ),
-                                    const SizedBox(height: 4),
+                    return Dismissible(
+                      key: Key('dismiss_$uid'),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(20)),
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        child: const Icon(Icons.delete,
+                            color: Colors.white, size: 32),
+                      ),
+                      onDismissed: (_) async {
+                        debugPrint('On Dismisseddddddddddddddddddd');
+                        final removed = Map<String, dynamic>.from(ex);
 
-                                    // LOGGED SETS
-                                    Text(
-                                      '$logged/$sets sets logged',
-                                      style: TextStyle(
-                                        color: isCompleted
-                                            ? Colors.orange
-                                            : Colors.white70,
-                                        fontWeight: isCompleted
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
+                        setState(() => currentExercises.removeAt(index));
 
-                                    // MUSCLES
-                                    Text(
-                                      muscles,
-                                      style: const TextStyle(
-                                          color: Colors.orange, fontSize: 13),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                  if (isWorkoutCompleted) return card;
+                        String? docId;
+                        try {
+                          final workoutSnap = FirebaseFirestore.instance
+                              .collection('workouts')
+                              .doc(widget.workout['id'])
+                              .get();
 
-                  return Dismissible(
-                    key: Key('dismiss_$uid'),
-                    direction: DismissDirection.endToStart,
-                    background: Container(
-                      margin: const EdgeInsets.only(bottom: 20),
-                      decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(20)),
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(right: 20),
-                      child: const Icon(Icons.delete,
-                          color: Colors.white, size: 32),
-                    ),
-                    onDismissed: (_) async {
-                      debugPrint('On Dismisseddddddddddddddddddd');
-                      final removed = Map<String, dynamic>.from(ex);
+                          final snapshot = await workoutSnap;
+                          final currentIds = List<String>.from(
+                              snapshot.data()?['exerciseIds'] ?? []);
 
-                      // === 1. Optimistic UI Remove ===
-                      setState(() => currentExercises.removeAt(index));
-
-                      String? docId;
-                      try {
-                        // === 2. Fetch current exerciseIds ===
-                        final workoutSnap = FirebaseFirestore.instance
-                            .collection('workouts')
-                            .doc(widget.workout['id'])
-                            .get();
-
-                        final snapshot = await workoutSnap;
-                        final currentIds = List<String>.from(
-                            snapshot.data()?['exerciseIds'] ?? []);
-
-                        if (index < currentIds.length) {
-                          docId = currentIds[index];
-                          debugPrint('Fetched docId from index: $docId');
-                        } else {
-                          debugPrint('Index out of bounds for exerciseIds');
-                        }
-                      } catch (e) {
-                        debugPrint('Failed to fetch exerciseIds: $e');
-                      }
-
-                      // === 3. Final check ===
-                      if (docId == null || docId.isEmpty) {
-                        debugPrint('No valid docId — skipping Firestore ops');
-                        await _calculateTotals();
-                        await _calculateMuscleTargets();
-                        await _updateDuration(); // <-- Recalculate on remove
-                        _showUndoSnackBar(removed, index, docId);
-                        return;
-                      }
-
-                      try {
-                        final workoutRef = FirebaseFirestore.instance
-                            .collection('workouts')
-                            .doc(widget.workout['id']);
-
-                        // === 4. Remove from exerciseIds ===
-                        await workoutRef.update({
-                          'exerciseIds': FieldValue.arrayRemove([docId]),
-                        });
-
-                        // === 5. Delete logged sets ===
-                        final loggedSetsSnap = await workoutRef
-                            .collection('logged_sets')
-                            .where('exerciseId', isEqualTo: docId)
-                            .get();
-
-                        if (loggedSetsSnap.docs.isNotEmpty) {
-                          final batch = FirebaseFirestore.instance.batch();
-                          for (var doc in loggedSetsSnap.docs) {
-                            batch.delete(doc.reference);
+                          if (index < currentIds.length) {
+                            docId = currentIds[index];
+                            debugPrint('Fetched docId from index: $docId');
+                          } else {
+                            debugPrint('Index out of bounds for exerciseIds');
                           }
-                          await batch.commit();
+                        } catch (e) {
+                          debugPrint('Failed to fetch exerciseIds: $e');
                         }
 
-                        // === 6. Success ===
-                        await _calculateTotals();
-                        await _calculateMuscleTargets();
-                        await _updateDuration(); // <-- Recalculate duration
-                        _showUndoSnackBar(removed, index, docId);
-                      } catch (e, stackTrace) {
-                        debugPrint('DELETE FAILED: $e\n$stackTrace');
+                        if (docId == null || docId.isEmpty) {
+                          debugPrint('No valid docId — skipping Firestore ops');
+                          await _calculateTotals();
+                          await _calculateMuscleTargets();
+                          await _updateDuration();
+                          _showUndoSnackBar(removed, index, docId);
+                          return;
+                        }
 
-                        // === 7. ROLLBACK UI ===
-                        setState(() => currentExercises.insert(index, removed));
-                        await _calculateTotals();
-                        await _calculateMuscleTargets();
-                        await _updateDuration(); // <-- Recalculate on rollback
+                        try {
+                          final workoutRef = FirebaseFirestore.instance
+                              .collection('workouts')
+                              .doc(widget.workout['id']);
 
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Delete failed: $e'),
-                            backgroundColor: Colors.red,
-                            duration: const Duration(seconds: 6),
-                          ),
-                        );
-                      }
-                    },
-                    child: card,
-                  );
-                }).toList(),
+                          await workoutRef.update({
+                            'exerciseIds': FieldValue.arrayRemove([docId]),
+                          });
+
+                          final loggedSetsSnap = await workoutRef
+                              .collection('logged_sets')
+                              .where('exerciseId', isEqualTo: docId)
+                              .get();
+
+                          if (loggedSetsSnap.docs.isNotEmpty) {
+                            final batch = FirebaseFirestore.instance.batch();
+                            for (var doc in loggedSetsSnap.docs) {
+                              batch.delete(doc.reference);
+                            }
+                            await batch.commit();
+                          }
+
+                          await _calculateTotals();
+                          await _calculateMuscleTargets();
+                          await _updateDuration();
+                          _showUndoSnackBar(removed, index, docId);
+                        } catch (e, stackTrace) {
+                          debugPrint('DELETE FAILED: $e\n$stackTrace');
+
+                          setState(
+                              () => currentExercises.insert(index, removed));
+                          await _calculateTotals();
+                          await _calculateMuscleTargets();
+                          await _updateDuration();
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Delete failed: $e'),
+                              backgroundColor: Colors.red,
+                              duration: const Duration(seconds: 6),
+                            ),
+                          );
+                        }
+                      },
+                      child: card,
+                    );
+                  }).toList(),
 
                 const SizedBox(height: 5),
 
