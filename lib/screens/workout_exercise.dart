@@ -12,14 +12,14 @@ class WorkoutExerciseScreen extends StatefulWidget {
   final String workoutId;
   final Map<String, dynamic> exercise;
   final bool isWorkoutStarted;
-  final bool isViewOnly; // ← REQUIRED: used throughout the screen
+  final bool isViewOnly;
 
   const WorkoutExerciseScreen({
     super.key,
     required this.workoutId,
     required this.exercise,
     required this.isWorkoutStarted,
-    this.isViewOnly = false, // default false for normal use
+    this.isViewOnly = false,
   });
 
   @override
@@ -79,7 +79,6 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
     _extractAndLoadExerciseId();
 
-    // Disable logging if workout not started
     if (!widget.isWorkoutStarted) {
       _showLogButton = false;
     }
@@ -390,6 +389,13 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     totalReps = 0;
     totalVolume = totalCalories = maxWeight = oneRepMax = 0.0;
 
+    // RESET ALL MARKERS
+    for (var s in sets) {
+      s['isMax'] = false; // 1RM
+      s['isMaxWeight'] = false; // Max Weight
+    }
+
+    // FIRST PASS: Calculate totals + find max values
     for (var s in sets) {
       final reps = s['reps'] as double?;
       final kg = s['kg'] as double?;
@@ -397,22 +403,37 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         totalReps += reps.toInt();
         totalVolume += reps * kg;
         totalCalories += reps * kg * 0.05;
-        if (kg > maxWeight) maxWeight = kg;
 
+        // Update max weight
+        if (kg > maxWeight) {
+          maxWeight = kg;
+        }
+
+        // Calculate 1RM
         final calc1RM = kg * (1 + reps / 30);
         if (calc1RM > oneRepMax) {
           oneRepMax = calc1RM;
-          s['isMax'] = true;
         }
       }
     }
 
+    // SECOND PASS: Mark records
     for (var s in sets) {
       final reps = s['reps'] as double?;
       final kg = s['kg'] as double?;
       if (reps != null && kg != null && s['isLogged'] == true) {
         final calc1RM = kg * (1 + reps / 30);
-        s['isMax'] = calc1RM >= oneRepMax;
+
+        // 1RM Record
+        if (calc1RM >= oneRepMax - 0.01) {
+          // Allow floating point
+          s['isMax'] = true;
+        }
+
+        // Max Weight Record (ONLY if not already 1RM)
+        if (kg >= maxWeight - 0.01 && calc1RM < oneRepMax) {
+          s['isMaxWeight'] = true;
+        }
       }
     }
 
@@ -446,7 +467,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   }
 
   void _adjustRest(int seconds) {
-    if (widget.isViewOnly) return; // ← FIXED: was 887widget
+    if (widget.isViewOnly) return;
     setState(() {
       restDuration =
           Duration(seconds: (restDuration.inSeconds + seconds).clamp(15, 3600));
@@ -457,25 +478,27 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   void _logOrComplete() async {
     if (widget.isViewOnly || !widget.isWorkoutStarted) return;
 
-    final currentSet =
-        sets.firstWhere((s) => s['isLogged'] != true, orElse: () => sets.last);
-    if (!currentSet['isLogged'] && currentSet['kg'] != null) {
-      setState(() => currentSet['isLogged'] = true);
+    // Find next unlogged set
+    final unloggedIndex = sets.indexWhere((s) => s['isLogged'] != true);
+    if (unloggedIndex == -1) return;
 
-      await FirebaseFirestore.instance
-          .collection('workouts')
-          .doc(widget.workoutId)
-          .collection('logged_sets')
-          .add({
-        'exerciseId': exerciseId,
-        'set': currentSet['set'],
-        'reps': currentSet['reps'],
-        'weight': currentSet['kg'],
-        'rir': currentSet['rir'],
-        'isMax': currentSet['isMax'],
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-    }
+    final currentSet = sets[unloggedIndex];
+    setState(() => currentSet['isLogged'] = true);
+
+    // Log even if weight is null/0
+    await FirebaseFirestore.instance
+        .collection('workouts')
+        .doc(widget.workoutId)
+        .collection('logged_sets')
+        .add({
+      'exerciseId': exerciseId,
+      'set': currentSet['set'],
+      'reps': currentSet['reps'],
+      'weight': currentSet['kg'],
+      'rir': currentSet['rir'],
+      'isMax': currentSet['isMax'] ?? false,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
 
     _updateTotals();
     _startRestTimer();
@@ -687,7 +710,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                         final s = entry.value;
                         final logged = s['isLogged'] == true;
                         final is1RM = s['isMax'] == true;
-                        final isMaxWeight = s['kg'] == maxWeight && !is1RM;
+                        final isMaxWeight = s['isMaxWeight'] == true;
 
                         return Dismissible(
                           key: Key(s['uniqueId'].toString()),
@@ -719,7 +742,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                                       if (is1RM)
                                         const Icon(Icons.emoji_events,
                                             color: Colors.amber, size: 20),
-                                      if (isMaxWeight && !is1RM)
+                                      if (isMaxWeight)
                                         const Icon(Icons.emoji_events_outlined,
                                             color: Colors.orange, size: 20),
                                       if (!is1RM && !isMaxWeight)
