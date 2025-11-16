@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_app_check/firebase_app_check.dart'; // NOW WORKS
 
 import 'screens/splash_screen.dart';
 import 'screens/sign_in_screen.dart';
@@ -20,11 +21,20 @@ import 'screens/profile_screen.dart';
 import 'screens/workout_main.dart';
 import 'screens/workout_exercise.dart';
 import 'screens/add_exercises.dart';
-import 'screens/exercise_statistics.dart'; // NUEVA IMPORTACIÓN
+import 'screens/edit_custom_exercise.dart';
+import 'screens/exercise_statistics.dart';
+import 'screens/search_exercises.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // FIXED: App Check now works
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: AndroidProvider.playIntegrity,
+    appleProvider: AppleProvider.appAttest,
+  );
+
   runApp(const IronCoachApp());
 }
 
@@ -37,9 +47,10 @@ class IronCoachApp extends StatelessWidget {
       title: 'IRON COACH',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-          primarySwatch: Colors.orange,
-          fontFamily: 'Montserrat',
-          scaffoldBackgroundColor: Colors.transparent),
+        primarySwatch: Colors.orange,
+        fontFamily: 'Montserrat',
+        scaffoldBackgroundColor: Colors.transparent,
+      ),
       home: const SplashScreen(),
       routes: {
         '/splash': (context) => const SplashScreen(),
@@ -50,12 +61,15 @@ class IronCoachApp extends StatelessWidget {
         '/your_gym': (context) => const YourGymScreen(),
         '/forging_exp': (context) => const ForgingExpScreen(),
         '/confirm': (context) => ConfirmationCodeScreen(
-            email: ModalRoute.of(context)!.settings.arguments as String),
+              email: ModalRoute.of(context)!.settings.arguments as String,
+            ),
         '/check_email_reset': (context) => ConfirmationCodeScreen(
-            email: ModalRoute.of(context)!.settings.arguments as String,
-            resetMode: true),
+              email: ModalRoute.of(context)!.settings.arguments as String,
+              resetMode: true,
+            ),
         '/set_new_password': (context) => SetNewPasswordScreen(
-            email: ModalRoute.of(context)!.settings.arguments as String),
+              email: ModalRoute.of(context)!.settings.arguments as String,
+            ),
         '/home': (context) => const HomeScreen(),
         '/search_menu': (context) => const SearchMenuScreen(),
         '/stats': (context) => const StatsScreen(),
@@ -91,11 +105,22 @@ class IronCoachApp extends StatelessWidget {
             exerciseName: args['exerciseName'] as String,
           );
         },
+        '/edit_custom_exercise': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments
+              as Map<String, dynamic>;
+          return EditCustomExerciseScreen(
+            exerciseId: args['exerciseId'],
+            exercise: args['exercise'],
+          );
+        },
+        '/search_exercises': (context) => const SearchExercisesScreen(),
         '/subscriptions': (context) => const Scaffold(
               body: Center(
-                child: Text("Subscribe for UNLIMITED Auto Coach!",
-                    style: TextStyle(fontSize: 24, color: Colors.orange),
-                    textAlign: TextAlign.center),
+                child: Text(
+                  "Subscribe for UNLIMITED Auto Coach!",
+                  style: TextStyle(fontSize: 24, color: Colors.orange),
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
       },
@@ -113,8 +138,10 @@ class AuthWrapper extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-              body: Center(
-                  child: CircularProgressIndicator(color: Colors.orange)));
+            body: Center(
+              child: CircularProgressIndicator(color: Colors.orange),
+            ),
+          );
         }
         return snapshot.hasData ? const HomeScreen() : const SignInScreen();
       },

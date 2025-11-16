@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../widgets/workout_card.dart';
+import 'search_exercises.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -127,6 +128,68 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
   void _onNavTap(int index) {
+    if (index == 1) {
+      // <-- SEARCH ICON (índice 1)
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (_) => Container(
+          height: 240,
+          decoration: const BoxDecoration(
+            color: Color(0xFF1C1C1E),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 20, bottom: 10),
+                child: Text(
+                  "Search",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const Divider(color: Colors.white24, height: 1),
+              ListTile(
+                leading: const Icon(Icons.fitness_center, color: Colors.orange),
+                title: const Text("Search Exercises",
+                    style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SearchExercisesScreen(),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.build, color: Colors.orange),
+                title: const Text("Search Equipment",
+                    style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Equipment search coming soon!"),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Otros íconos: navegan normalmente
     setState(() => _selectedIndex = index);
     final routes = ['/home', '/search_menu', '/stats', '/messages', '/profile'];
     Navigator.pushNamed(context, routes[index]);
