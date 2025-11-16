@@ -1,4 +1,6 @@
 // lib/screens/instructions_screen.dart
+import 'dart:io'; // ADD THIS LINE
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_player/video_player.dart';
@@ -55,6 +57,39 @@ class _InstructionsScreenState extends State<InstructionsScreen> {
       );
       setState(() {});
     }
+  }
+
+  Widget _buildExerciseImage() {
+    final imageUrl = widget.exercise['imageUrl'] as String?;
+
+    // CASE 1: Local file (after picking new image)
+    if (imageUrl != null && imageUrl.startsWith('file://')) {
+      return Image.file(
+        File(imageUrl),
+        width: double.infinity,
+        height: 240,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _buildImageError(),
+      );
+    }
+
+    // CASE 2: Network URL
+    return Image.network(
+      imageUrl ?? '',
+      width: double.infinity,
+      height: 240,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _buildImageError(),
+    );
+  }
+
+  Widget _buildImageError() {
+    return Container(
+      color: Colors.grey[800],
+      child: const Center(
+        child: Icon(Icons.fitness_center, size: 80, color: Colors.white54),
+      ),
+    );
   }
 
   Future<void> _loadMuscles() async {
@@ -153,7 +188,6 @@ class _InstructionsScreenState extends State<InstructionsScreen> {
                   icon: const Icon(Icons.edit, color: Colors.orange, size: 18),
                   label: const Text("Edit Custom Exercise",
                       style: TextStyle(color: Colors.orange)),
-// In instructions_screen.dart — replace the entire TextButton.icon onPressed
                   onPressed: () async {
                     final exerciseId =
                         widget.exercise['docId'] ?? widget.exercise['id'];
@@ -214,26 +248,20 @@ class _InstructionsScreenState extends State<InstructionsScreen> {
             Container(
               height: 240,
               decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: const Color(0xFF1C1C1E)),
+                borderRadius: BorderRadius.circular(20),
+                color: const Color(0xFF1C1C1E),
+              ),
               child: Stack(
                 children: [
                   PageView(
                     controller: _pageController,
                     children: [
+                      // MAIN IMAGE - FIXED
                       ClipRRect(
                         borderRadius: BorderRadius.circular(20),
-                        child: Image.network(
-                          widget.exercise['imageUrl'] ?? '',
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: Colors.grey[800],
-                            child: const Icon(Icons.fitness_center,
-                                size: 80, color: Colors.white54),
-                          ),
-                        ),
+                        child: _buildExerciseImage(),
                       ),
+                      // VIDEO
                       if (hasVideo)
                         ClipRRect(
                           borderRadius: BorderRadius.circular(20),
@@ -347,7 +375,10 @@ class _InstructionsScreenState extends State<InstructionsScreen> {
           child: imageUrl != null && imageUrl.isNotEmpty
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: Image.network(imageUrl, fit: BoxFit.cover))
+                  child: imageUrl.startsWith('file://')
+                      ? Image.file(File(imageUrl), fit: BoxFit.cover)
+                      : Image.network(imageUrl, fit: BoxFit.cover),
+                )
               : const Icon(Icons.fitness_center, color: Colors.white70),
         ),
         const SizedBox(height: 8),
