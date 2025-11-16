@@ -390,13 +390,11 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     totalReps = 0;
     totalVolume = totalCalories = maxWeight = oneRepMax = 0.0;
 
-    // RESET ALL MARKERS
     for (var s in sets) {
-      s['isMax'] = false; // 1RM
-      s['isMaxWeight'] = false; // Max Weight
+      s['isMax'] = false;
+      s['isMaxWeight'] = false;
     }
 
-    // FIRST PASS: Calculate totals + find max values
     for (var s in sets) {
       final reps = s['reps'] as double?;
       final kg = s['kg'] as double?;
@@ -405,12 +403,10 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         totalVolume += reps * kg;
         totalCalories += reps * kg * 0.05;
 
-        // Update max weight
         if (kg > maxWeight) {
           maxWeight = kg;
         }
 
-        // Calculate 1RM
         final calc1RM = kg * (1 + reps / 30);
         if (calc1RM > oneRepMax) {
           oneRepMax = calc1RM;
@@ -418,20 +414,16 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       }
     }
 
-    // SECOND PASS: Mark records
     for (var s in sets) {
       final reps = s['reps'] as double?;
       final kg = s['kg'] as double?;
       if (reps != null && kg != null && s['isLogged'] == true) {
         final calc1RM = kg * (1 + reps / 30);
 
-        // 1RM Record
         if (calc1RM >= oneRepMax - 0.01) {
-          // Allow floating point
           s['isMax'] = true;
         }
 
-        // Max Weight Record (ONLY if not already 1RM)
         if (kg >= maxWeight - 0.01 && calc1RM < oneRepMax) {
           s['isMaxWeight'] = true;
         }
@@ -479,14 +471,12 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   void _logOrComplete() async {
     if (widget.isViewOnly || !widget.isWorkoutStarted) return;
 
-    // Find next unlogged set
     final unloggedIndex = sets.indexWhere((s) => s['isLogged'] != true);
     if (unloggedIndex == -1) return;
 
     final currentSet = sets[unloggedIndex];
     setState(() => currentSet['isLogged'] = true);
 
-    // Log even if weight is null/0
     await FirebaseFirestore.instance
         .collection('workouts')
         .doc(widget.workoutId)
@@ -541,6 +531,55 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                 ? _buildVideoErrorWidget()
                 : Chewie(controller: _chewieController!),
           ),
+        ),
+      ),
+    );
+  }
+
+  // FIXED: Extracted async logic
+  Future<void> _openInstructions() async {
+    String? docId = widget.exercise['docId']?.toString() ??
+        widget.exercise['id']?.toString();
+
+    if (docId == null || docId.isEmpty || docId == 'unknown') {
+      try {
+        final workoutDoc = await FirebaseFirestore.instance
+            .collection('workouts')
+            .doc(widget.workoutId)
+            .get();
+
+        if (workoutDoc.exists) {
+          final exerciseIds = workoutDoc['exerciseIds'] as List<dynamic>? ?? [];
+          final exerciseName =
+              widget.exercise['name']?.toString().toLowerCase() ?? '';
+
+          for (String id in exerciseIds) {
+            final doc = await FirebaseFirestore.instance
+                .collection('exercises_custom')
+                .doc(id)
+                .get();
+            if (doc.exists &&
+                doc['name']?.toString().toLowerCase() == exerciseName) {
+              docId = id;
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Failed to find custom exercise ID: $e');
+      }
+    }
+
+    docId ??= exerciseId;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => InstructionsScreen(
+          exercise: {
+            ...widget.exercise,
+            'docId': docId,
+          },
         ),
       ),
     );
@@ -916,7 +955,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
           BottomNavigationBarItem(
               icon: Icon(Icons.bar_chart), label: 'Statistics'),
         ],
-        onTap: (i) {
+        onTap: (i) async {
           if (i == 0 && !widget.isViewOnly) {
             showDialog(
               context: context,
@@ -969,12 +1008,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
             );
           }
           if (i == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) =>
-                      InstructionsScreen(exercise: widget.exercise)),
-            );
+            await _openInstructions();
           }
           if (i == 2) {
             Navigator.pushNamed(
