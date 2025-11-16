@@ -5,9 +5,9 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 
 class InstructionsScreen extends StatefulWidget {
-  final Map<String, dynamic> exercise;
+  Map<String, dynamic> exercise; // ← Remove final
 
-  const InstructionsScreen({super.key, required this.exercise});
+  InstructionsScreen({super.key, required this.exercise});
 
   @override
   State<InstructionsScreen> createState() => _InstructionsScreenState();
@@ -145,6 +145,69 @@ class _InstructionsScreenState extends State<InstructionsScreen> {
                   fontSize: 24,
                   fontWeight: FontWeight.bold),
             ),
+            if (widget.exercise['isCustom'] == true ||
+                widget.exercise['userId'] != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.edit, color: Colors.orange, size: 18),
+                  label: const Text("Edit Custom Exercise",
+                      style: TextStyle(color: Colors.orange)),
+// In instructions_screen.dart — replace the entire TextButton.icon onPressed
+                  onPressed: () async {
+                    final exerciseId =
+                        widget.exercise['docId'] ?? widget.exercise['id'];
+                    if (exerciseId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Error: Exercise ID not found')),
+                      );
+                      return;
+                    }
+
+                    // Fetch fresh data before editing
+                    final doc = await FirebaseFirestore.instance
+                        .collection('exercises_custom')
+                        .doc(exerciseId)
+                        .get();
+
+                    if (!doc.exists) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Custom exercise not found')),
+                      );
+                      return;
+                    }
+
+                    final updated = await Navigator.pushNamed(
+                      context,
+                      '/edit_custom_exercise',
+                      arguments: {
+                        'exerciseId': exerciseId,
+                        'exercise': doc.data()!,
+                      },
+                    );
+
+                    // RELOAD DATA ON RETURN
+                    if (updated == true) {
+                      final refreshedDoc = await FirebaseFirestore.instance
+                          .collection('exercises_custom')
+                          .doc(exerciseId)
+                          .get();
+
+                      if (refreshedDoc.exists) {
+                        setState(() {
+                          widget.exercise.addAll(
+                              refreshedDoc.data()!); // Update widget.exercise
+                        });
+                        _loadVideo(); // Reload video if changed
+                        _loadMuscles(); // Reload muscle images
+                        _loadEquipment(); // Reload equipment images
+                      }
+                    }
+                  },
+                ),
+              ),
             const SizedBox(height: 20),
 
             // IMAGE + VIDEO CAROUSEL
