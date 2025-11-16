@@ -713,7 +713,7 @@ https://ironcoach.app
                         future: _getLoggedSetsCount(docId),
                         builder: (ctx, snap) {
                           final logged = snap.data ?? 0;
-                          final isCompleted = logged >= sets;
+                          final isCompleted = logged >= 1;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 20),

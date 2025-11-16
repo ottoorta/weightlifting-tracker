@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'instructions_screen.dart';
+import 'exercise_statistics.dart';
 
 class WorkoutExerciseScreen extends StatefulWidget {
   final String workoutId;
@@ -342,9 +343,9 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
   void _setupSets() {
     int defaultReps = 10;
-    if (userGoal == 'gain strength')
+    if (userGoal == 'gain strength') {
       defaultReps = 15;
-    else if (userGoal == 'lose weight') defaultReps = 12;
+    } else if (userGoal == 'lose weight') defaultReps = 12;
 
     final setsCount = widget.exercise['sets'] ?? 4;
     sets.clear();
@@ -776,7 +777,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                             ),
                           ),
                         );
-                      }).toList(),
+                      }),
 
                       const SizedBox(height: 20),
 
@@ -973,6 +974,16 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
               MaterialPageRoute(
                   builder: (context) =>
                       InstructionsScreen(exercise: widget.exercise)),
+            );
+          }
+          if (i == 2) {
+            Navigator.pushNamed(
+              context,
+              '/exercise_statistics',
+              arguments: {
+                'exerciseId': exerciseId,
+                'exerciseName': widget.exercise['name'] ?? 'Exercise',
+              },
             );
           }
         },
