@@ -1,0 +1,451 @@
+// lib/screens/search_exercises.dart
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'exercise_details.dart';
+
+class SearchExercisesScreen extends StatefulWidget {
+  const SearchExercisesScreen({super.key});
+
+  @override
+  State<SearchExercisesScreen> createState() => _SearchExercisesScreenState();
+}
+
+class _SearchExercisesScreenState extends State<SearchExercisesScreen> {
+  List<Map<String, dynamic>> allExercises = [];
+  List<Map<String, dynamic>> filteredExercises = [];
+  String searchQuery = '';
+
+  String? selectedMuscle = 'All';
+  String? selectedEquipment = 'All';
+  List<String> muscleList = [];
+  List<String> equipmentList = [];
+
+  final user = FirebaseAuth.instance.currentUser;
+  final Map<String, String> _equipmentNameCache = {};
+
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      allExercises.clear();
+      filteredExercises.clear();
+      _isLoading = true;
+    });
+
+    try {
+      await Future.wait([
+        _loadOfficialExercises(),
+        _loadCustomExercises(),
+        _loadMuscles(),
+        _loadEquipmentList(),
+      ]);
+    } catch (e) {
+      debugPrint("Error loading data: $e");
+    }
+
+    _applyFilters();
+
+    setState(() => _isLoading = false);
+  }
+
+  Future<void> _loadOfficialExercises() async {
+    final snapshot =
+        await FirebaseFirestore.instance.collection('exercises').get();
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      final equipmentIds = data['equipment'] as List<dynamic>? ?? [];
+
+      String equipmentText = "None";
+      if (equipmentIds.isNotEmpty) {
+        List<String> names = [];
+        for (String id in equipmentIds) {
+          if (_equipmentNameCache.containsKey(id)) {
+            names.add(_equipmentNameCache[id]!);
+          } else {
+            final eqDoc = await FirebaseFirestore.instance
+                .collection('equipment')
+                .doc(id)
+                .get();
+            final name =
+                eqDoc.exists ? (eqDoc['name'] ?? 'Unknown') : 'Unknown';
+            _equipmentNameCache[id] = name;
+            names.add(name);
+          }
+        }
+        equipmentText = names.join(', ');
+      }
+
+      allExercises.add({
+        'id': doc.id,
+        'isCustom': false,
+        ...data,
+        '_equipmentText': equipmentText,
+      });
+    }
+  }
+
+  Future<void> _loadCustomExercises() async {
+    if (user == null) return;
+
+    final userSnapshot = await FirebaseFirestore.instance
+        .collection('exercises_custom')
+        .where('userId', isEqualTo: user!.uid)
+        .get();
+
+    for (var doc in userSnapshot.docs) {
+      final data = doc.data();
+      final equipmentIds = data['equipment'] as List<dynamic>? ?? [];
+      String equipmentText = "None";
+      if (equipmentIds.isNotEmpty) {
+        List<String> names = [];
+        for (String id in equipmentIds) {
+          if (_equipmentNameCache.containsKey(id)) {
+            names.add(_equipmentNameCache[id]!);
+          } else {
+            final eqDoc = await FirebaseFirestore.instance
+                .collection('equipment')
+                .doc(id)
+                .get();
+            final name =
+                eqDoc.exists ? (eqDoc['name'] ?? 'Unknown') : 'Unknown';
+            _equipmentNameCache[id] = name;
+            names.add(name);
+          }
+        }
+        equipmentText = names.join(', ');
+      }
+
+      allExercises.add({
+        'id': doc.id,
+        'isCustom': true,
+        ...data,
+        '_equipmentText': equipmentText,
+      });
+    }
+
+    try {
+      final publicSnapshot = await FirebaseFirestore.instance
+          .collection('exercises_custom')
+          .where('isPublic', isEqualTo: true)
+          .where('userId', isNotEqualTo: user!.uid)
+          .get();
+
+      for (var doc in publicSnapshot.docs) {
+        final data = doc.data();
+        final equipmentIds = data['equipment'] as List<dynamic>? ?? [];
+        String equipmentText = "None";
+        if (equipmentIds.isNotEmpty) {
+          List<String> names = [];
+          for (String id in equipmentIds) {
+            if (_equipmentNameCache.containsKey(id)) {
+              names.add(_equipmentNameCache[id]!);
+            } else {
+              final eqDoc = await FirebaseFirestore.instance
+                  .collection('equipment')
+                  .doc(id)
+                  .get();
+              final name =
+                  eqDoc.exists ? (eqDoc['name'] ?? 'Unknown') : 'Unknown';
+              _equipmentNameCache[id] = name;
+              names.add(name);
+            }
+          }
+          equipmentText = names.join(', ');
+        }
+
+        allExercises.add({
+          'id': doc.id,
+          'isCustom': true,
+          'isPublic': true,
+          ...data,
+          '_equipmentText': equipmentText,
+        });
+      }
+    } catch (e) {
+      debugPrint("Public exercises failed: $e");
+    }
+  }
+
+  Future<void> _loadMuscles() async {
+    final snap = await FirebaseFirestore.instance.collection('muscles').get();
+    final names = snap.docs.map((doc) => doc['name'] as String).toList();
+    setState(() {
+      muscleList = ['All', ...names]..sort((a, b) => a == 'All'
+          ? -1
+          : b == 'All'
+              ? 1
+              : a.compareTo(b));
+    });
+  }
+
+  Future<void> _loadEquipmentList() async {
+    final snap = await FirebaseFirestore.instance.collection('equipment').get();
+    final names = snap.docs.map((doc) => doc['name'] as String).toList();
+    setState(() {
+      equipmentList = ['All', 'None', ...names]..sort((a, b) {
+          if (a == 'All') return -1;
+          if (b == 'All') return 1;
+          if (a == 'None') return -1;
+          if (b == 'None') return 1;
+          return a.compareTo(b);
+        });
+    });
+  }
+
+  void _applyFilters() {
+    List<Map<String, dynamic>> filtered = allExercises;
+
+    if (searchQuery.isNotEmpty) {
+      filtered = filtered.where((ex) {
+        final name = (ex['name'] as String?)?.toLowerCase() ?? '';
+        return name.contains(searchQuery.toLowerCase());
+      }).toList();
+    }
+
+    if (selectedMuscle != null && selectedMuscle != 'All') {
+      filtered = filtered.where((ex) {
+        final muscles = ex['muscles'] as List<dynamic>? ?? [];
+        return muscles.contains(selectedMuscle);
+      }).toList();
+    }
+
+    if (selectedEquipment != null && selectedEquipment != 'All') {
+      if (selectedEquipment == 'None') {
+        filtered = filtered.where((ex) {
+          final ids = ex['equipment'] as List<dynamic>? ?? [];
+          return ids.isEmpty;
+        }).toList();
+      } else {
+        filtered = filtered.where((ex) {
+          final ids = ex['equipment'] as List<dynamic>? ?? [];
+          return ids.any((id) => _equipmentNameCache[id] == selectedEquipment);
+        }).toList();
+      }
+    }
+
+    setState(() => filteredExercises = filtered);
+  }
+
+  void _clearFilters() {
+    setState(() {
+      selectedMuscle = 'All';
+      selectedEquipment = 'All';
+      searchQuery = '';
+    });
+    _applyFilters();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.orange),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text("Search Exercises",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        actions: [
+          if (selectedMuscle != 'All' ||
+              selectedEquipment != 'All' ||
+              searchQuery.isNotEmpty)
+            TextButton(
+                onPressed: _clearFilters,
+                child: const Text("Clear",
+                    style: TextStyle(color: Colors.orange))),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Colors.orange))
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      TextField(
+                        onChanged: (val) {
+                          searchQuery = val;
+                          _applyFilters();
+                        },
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Search exercises...",
+                          hintStyle: const TextStyle(color: Colors.white38),
+                          filled: true,
+                          fillColor: const Color(0xFF1C1C1E),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          prefixIcon:
+                              const Icon(Icons.search, color: Colors.orange),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: selectedMuscle,
+                              decoration: InputDecoration(
+                                labelText: "Muscle",
+                                filled: true,
+                                fillColor: const Color(0xFF1C1C1E),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                              dropdownColor: const Color(0xFF1C1C1E),
+                              items: muscleList
+                                  .map((m) => DropdownMenuItem(
+                                      value: m,
+                                      child: Text(m,
+                                          style: const TextStyle(
+                                              color: Colors.white))))
+                                  .toList(),
+                              onChanged: (val) {
+                                selectedMuscle = val;
+                                _applyFilters();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: selectedEquipment,
+                              decoration: InputDecoration(
+                                labelText: "Equipment",
+                                filled: true,
+                                fillColor: const Color(0xFF1C1C1E),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                              dropdownColor: const Color(0xFF1C1C1E),
+                              items: equipmentList
+                                  .map((e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e,
+                                          style: const TextStyle(
+                                              color: Colors.white))))
+                                  .toList(),
+                              onChanged: (val) {
+                                selectedEquipment = val;
+                                _applyFilters();
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: filteredExercises.isEmpty
+                      ? const Center(
+                          child: Text("No exercises found",
+                              style: TextStyle(color: Colors.white60)))
+                      : ListView.builder(
+                          itemCount: filteredExercises.length,
+                          itemBuilder: (context, index) {
+                            final ex = filteredExercises[index];
+                            final isCustom = ex['isCustom'] == true;
+                            final equipmentText =
+                                ex['_equipmentText'] ?? 'None';
+
+                            return GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        ExerciseDetailsScreen(exercise: ex),
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1C1C1E),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: isCustom
+                                      ? Border.all(
+                                          color: Colors.orange, width: 1)
+                                      : null,
+                                ),
+                                child: Row(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.network(
+                                        ex['imageUrl'] ?? '',
+                                        width: 60,
+                                        height: 60,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Container(
+                                          width: 60,
+                                          height: 60,
+                                          color: Colors.grey[800],
+                                          child: const Icon(
+                                              Icons.fitness_center,
+                                              color: Colors.white54),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            ex['name'] ?? 'Unknown',
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 16),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            "Muscles: ${(ex['muscles'] as List?)?.join(', ') ?? 'None'}",
+                                            style: const TextStyle(
+                                                color: Colors.white60,
+                                                fontSize: 12),
+                                          ),
+                                          Text(
+                                            "Equipment: $equipmentText",
+                                            style: const TextStyle(
+                                                color: Colors.white60,
+                                                fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Icon(Icons.settings,
+                                        color: Colors.orange, size: 24),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+    );
+  }
+}

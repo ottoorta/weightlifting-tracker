@@ -24,6 +24,7 @@ import 'screens/add_exercises.dart';
 import 'screens/edit_custom_exercise.dart';
 import 'screens/exercise_statistics.dart';
 import 'screens/search_exercises.dart';
+import 'screens/exercise_details.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,6 +79,11 @@ class IronCoachApp extends StatelessWidget {
         '/add_exercises': (context) {
           final args = ModalRoute.of(context)!.settings.arguments as String;
           return AddExercisesScreen(workoutId: args);
+        },
+        '/exercise_details': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments
+              as Map<String, dynamic>;
+          return ExerciseDetailsScreen(exercise: args['exercise']);
         },
         '/workout_main': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
