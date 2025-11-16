@@ -65,9 +65,13 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
   // LOG BUTTON VISIBILITY
   bool _showLogButton = true;
 
+  // Make exercise mutable
+  late Map<String, dynamic> _currentExercise;
+
   @override
   void initState() {
     super.initState();
+    _currentExercise = Map.from(widget.exercise);
 
     _pageController = PageController();
     _pageController.addListener(() {
@@ -82,6 +86,56 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
     if (!widget.isWorkoutStarted) {
       _showLogButton = false;
+    }
+  }
+
+  @override
+  void didUpdateWidget(WorkoutExerciseScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only trigger refresh if exercise data changed
+    if (widget.exercise != oldWidget.exercise) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _refreshExerciseData();
+      });
+    }
+  }
+
+  Future<void> _refreshExerciseData() async {
+    if (!mounted) return;
+    setState(() => isLoading = true);
+
+    try {
+      final docId = _currentExercise['docId'] ?? _currentExercise['id'];
+      if (docId == null) return;
+
+      final refreshedDoc = await FirebaseFirestore.instance
+          .collection('exercises_custom')
+          .doc(docId)
+          .get();
+
+      if (refreshedDoc.exists) {
+        setState(() {
+          _currentExercise = refreshedDoc.data()!;
+        });
+
+        // Reload video
+        final videoUrl = _currentExercise['videoUrl'] as String?;
+        if (videoUrl != null && videoUrl.trim().isNotEmpty) {
+          await _initializeVideoSafely(videoUrl.trim());
+        } else {
+          await _videoController?.dispose();
+          _chewieController?.dispose();
+          setState(() {
+            _videoController = null;
+            _chewieController = null;
+            _hasVideo = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Refresh error: $e');
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -118,7 +172,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     setState(() => isLoading = true);
 
     try {
-      final String? directId = widget.exercise['id']?.toString();
+      final String? directId = _currentExercise['id']?.toString();
       if (directId != null && directId.isNotEmpty && directId != 'unknown') {
         exerciseId = directId;
         await _loadUserSettingsAndData();
@@ -139,7 +193,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       final data = workoutDoc.data()!;
       final List<dynamic> exerciseIds = data['exerciseIds'] ?? [];
       final exerciseName =
-          widget.exercise['name']?.toString().toLowerCase() ?? '';
+          _currentExercise['name']?.toString().toLowerCase() ?? '';
 
       for (String id in exerciseIds) {
         var doc = await FirebaseFirestore.instance
@@ -347,7 +401,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
       defaultReps = 15;
     } else if (userGoal == 'lose weight') defaultReps = 12;
 
-    final setsCount = widget.exercise['sets'] ?? 4;
+    final setsCount = _currentExercise['sets'] ?? 4;
     sets.clear();
     for (int i = 1; i <= setsCount; i++) {
       sets.add({
@@ -536,10 +590,10 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
     );
   }
 
-  // FIXED: Extracted async logic
+  // FIXED: Refresh exercise data on return
   Future<void> _openInstructions() async {
-    String? docId = widget.exercise['docId']?.toString() ??
-        widget.exercise['id']?.toString();
+    String? docId = _currentExercise['docId']?.toString() ??
+        _currentExercise['id']?.toString();
 
     if (docId == null || docId.isEmpty || docId == 'unknown') {
       try {
@@ -551,7 +605,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         if (workoutDoc.exists) {
           final exerciseIds = workoutDoc['exerciseIds'] as List<dynamic>? ?? [];
           final exerciseName =
-              widget.exercise['name']?.toString().toLowerCase() ?? '';
+              _currentExercise['name']?.toString().toLowerCase() ?? '';
 
           for (String id in exerciseIds) {
             final doc = await FirebaseFirestore.instance
@@ -572,17 +626,22 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
 
     docId ??= exerciseId;
 
-    Navigator.push(
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => InstructionsScreen(
           exercise: {
-            ...widget.exercise,
+            ..._currentExercise,
             'docId': docId,
           },
         ),
       ),
     );
+
+    // TRIGGER REFRESH ON RETURN
+    if (result == true) {
+      _refreshExerciseData();
+    }
   }
 
   @override
@@ -597,7 +656,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
         leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios, color: Colors.orange),
             onPressed: () => Navigator.pop(context)),
-        title: Text(widget.exercise['name'] ?? 'Exercise',
+        title: Text(_currentExercise['name'] ?? 'Exercise',
             style: const TextStyle(
                 color: Colors.white, fontWeight: FontWeight.bold)),
         actions: [
@@ -630,7 +689,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(20),
                                   child: Image.network(
-                                    widget.exercise['imageUrl'] ?? '',
+                                    _currentExercise['imageUrl'] ?? '',
                                     width: double.infinity,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, __, ___) => Container(
@@ -1016,7 +1075,7 @@ class _WorkoutExerciseScreenState extends State<WorkoutExerciseScreen> {
               '/exercise_statistics',
               arguments: {
                 'exerciseId': exerciseId,
-                'exerciseName': widget.exercise['name'] ?? 'Exercise',
+                'exerciseName': _currentExercise['name'] ?? 'Exercise',
               },
             );
           }
