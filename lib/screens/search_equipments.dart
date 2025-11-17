@@ -43,7 +43,8 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
   Future<void> _loadOfficial() async {
     final snap = await FirebaseFirestore.instance.collection('equipment').get();
     for (var doc in snap.docs) {
-      allEquipment.add({'id': doc.id, 'isCustom': false, ...doc.data()});
+      final data = doc.data();
+      allEquipment.add({'id': doc.id, 'isCustom': false, ...data});
     }
   }
 
@@ -54,7 +55,8 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
         .where('userId', isEqualTo: user!.uid)
         .get();
     for (var doc in snap.docs) {
-      allEquipment.add({'id': doc.id, 'isCustom': true, ...doc.data()});
+      final data = doc.data();
+      allEquipment.add({'id': doc.id, 'isCustom': true, ...data});
     }
   }
 
@@ -138,7 +140,7 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                // List
+                // List – FIX OVERFLOW + IMAGEN SEGURA
                 Expanded(
                   child: filteredEquipment.isEmpty
                       ? const Center(
@@ -149,11 +151,12 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                           itemBuilder: (context, i) {
                             final eq = filteredEquipment[i];
                             final bool isCustom = eq['isCustom'] == true;
-                            final String? img = eq['imageUrl'] as String?;
+                            final String? imgUrl = eq['imageUrl'] as String?;
                             final String name =
-                                eq['name'] as String? ?? 'Unknown';
+                                (eq['name'] as String?)?.trim() ?? 'Unknown';
                             final String muscles =
-                                eq['muscleGroups'] as String? ?? 'None';
+                                (eq['muscleGroups'] as String?)?.trim() ??
+                                    'None';
 
                             return Container(
                               margin: const EdgeInsets.symmetric(
@@ -168,22 +171,14 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                               ),
                               child: Row(
                                 children: [
+                                  // Imagen con fallback seguro
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
-                                    child: img != null && img.isNotEmpty
-                                        ? Image.network(img,
-                                            width: 70,
-                                            height: 70,
-                                            fit: BoxFit.cover)
-                                        : Container(
-                                            width: 70,
-                                            height: 70,
-                                            color: Colors.grey[800],
-                                            child: const Icon(
-                                                Icons.fitness_center,
-                                                color: Colors.white54)),
+                                    child: _buildImage(imgUrl),
                                   ),
                                   const SizedBox(width: 12),
+
+                                  // Texto con overflow controlado
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
@@ -192,12 +187,17 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                                         Row(
                                           children: [
                                             Expanded(
-                                                child: Text(name,
-                                                    style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontSize: 16))),
+                                              child: Text(
+                                                name,
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 16),
+                                                overflow: TextOverflow
+                                                    .ellipsis, // FIX OVERFLOW
+                                                maxLines: 1,
+                                              ),
+                                            ),
                                             if (isCustom)
                                               const Icon(Icons.star,
                                                   color: Colors.orange,
@@ -205,10 +205,14 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                                           ],
                                         ),
                                         const SizedBox(height: 4),
-                                        Text("Muscles: $muscles",
-                                            style: const TextStyle(
-                                                color: Colors.white60,
-                                                fontSize: 12)),
+                                        Text(
+                                          "Muscles: $muscles",
+                                          style: const TextStyle(
+                                              color: Colors.white60,
+                                              fontSize: 12),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -220,6 +224,50 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  // FIX: imagen segura contra URLs rotas o vacías
+  Widget _buildImage(String? url) {
+    if (url == null ||
+        url.isEmpty ||
+        url.startsWith('file://') ||
+        url.trim() == '') {
+      return Container(
+        width: 70,
+        height: 70,
+        color: Colors.grey[800],
+        child:
+            const Icon(Icons.fitness_center, color: Colors.white54, size: 32),
+      );
+    }
+
+    return Image.network(
+      url,
+      width: 70,
+      height: 70,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        width: 70,
+        height: 70,
+        color: Colors.grey[800],
+        child:
+            const Icon(Icons.fitness_center, color: Colors.white54, size: 32),
+      ),
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Container(
+          width: 70,
+          height: 70,
+          color: Colors.grey[800],
+          child: const Center(
+              child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      color: Colors.orange, strokeWidth: 2))),
+        );
+      },
     );
   }
 }
