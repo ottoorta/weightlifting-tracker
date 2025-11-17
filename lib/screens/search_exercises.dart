@@ -356,8 +356,12 @@ class _SearchExercisesScreenState extends State<SearchExercisesScreen> {
                 ),
                 const SizedBox(height: 5),
                 GestureDetector(
-                  onTap: () {
-                    Navigator.pushNamed(context, '/add_custom_exercise');
+                  onTap: () async {
+                    final result = await Navigator.pushNamed(
+                        context, '/add_custom_exercise');
+                    if (result == true) {
+                      _loadData(); // Refresca la lista al volver
+                    }
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
