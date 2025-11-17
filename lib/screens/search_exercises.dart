@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'exercise_details.dart';
+import 'add_custom_exercise.dart';
 
 class SearchExercisesScreen extends StatefulWidget {
   const SearchExercisesScreen({super.key});
@@ -352,6 +353,32 @@ class _SearchExercisesScreenState extends State<SearchExercisesScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 5),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.pushNamed(context, '/add_custom_exercise');
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 16),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add_circle_outline, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text(
+                          "Add Custom Exercise",
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
                 Expanded(
                   child: filteredExercises.isEmpty
                       ? const Center(
