@@ -43,8 +43,7 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
   Future<void> _loadOfficial() async {
     final snap = await FirebaseFirestore.instance.collection('equipment').get();
     for (var doc in snap.docs) {
-      final data = doc.data();
-      allEquipment.add({'id': doc.id, 'isCustom': false, ...data});
+      allEquipment.add({'id': doc.id, 'isCustom': false, ...doc.data()});
     }
   }
 
@@ -55,8 +54,7 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
         .where('userId', isEqualTo: user!.uid)
         .get();
     for (var doc in snap.docs) {
-      final data = doc.data();
-      allEquipment.add({'id': doc.id, 'isCustom': true, ...data});
+      allEquipment.add({'id': doc.id, 'isCustom': true, ...doc.data()});
     }
   }
 
@@ -69,6 +67,45 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
       }).toList();
     }
     setState(() => filteredEquipment = filtered);
+  }
+
+  Future<void> _deleteCustomEquipment(String docId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text("Delete Equipment",
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+            "Are you sure you want to delete this custom equipment?",
+            style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel",
+                  style: TextStyle(color: Colors.white70))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await FirebaseFirestore.instance
+          .collection('equipment_custom')
+          .doc(docId)
+          .delete();
+      _loadData(); // Refresh list
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text("Custom equipment deleted"),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   @override
@@ -140,7 +177,7 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                // List – FIX OVERFLOW + IMAGEN SEGURA
+                // Equipment List with Swipe to Delete
                 Expanded(
                   child: filteredEquipment.isEmpty
                       ? const Center(
@@ -157,67 +194,27 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
                             final String muscles =
                                 (eq['muscleGroups'] as String?)?.trim() ??
                                     'None';
+                            final String docId = eq['id'] as String;
 
-                            return Container(
-                              margin: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 6),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1C1C1E),
-                                borderRadius: BorderRadius.circular(16),
-                                border: isCustom
-                                    ? Border.all(color: Colors.orange, width: 2)
-                                    : null,
-                              ),
-                              child: Row(
-                                children: [
-                                  // Imagen con fallback seguro
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: _buildImage(imgUrl),
-                                  ),
-                                  const SizedBox(width: 12),
+                            // Solo custom equipment puede borrarse
+                            if (!isCustom) {
+                              return _buildEquipmentTile(
+                                  eq, name, muscles, imgUrl, null);
+                            }
 
-                                  // Texto con overflow controlado
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                name,
-                                                style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 16),
-                                                overflow: TextOverflow
-                                                    .ellipsis, // FIX OVERFLOW
-                                                maxLines: 1,
-                                              ),
-                                            ),
-                                            if (isCustom)
-                                              const Icon(Icons.star,
-                                                  color: Colors.orange,
-                                                  size: 20),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          "Muscles: $muscles",
-                                          style: const TextStyle(
-                                              color: Colors.white60,
-                                              fontSize: 12),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                            return Dismissible(
+                              key: Key(docId),
+                              direction: DismissDirection.endToStart,
+                              background: Container(
+                                color: Colors.red,
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                child: const Icon(Icons.delete,
+                                    color: Colors.white, size: 30),
                               ),
+                              onDismissed: (_) => _deleteCustomEquipment(docId),
+                              child: _buildEquipmentTile(
+                                  eq, name, muscles, imgUrl, docId),
                             );
                           },
                         ),
@@ -227,47 +224,104 @@ class _SearchEquipmentsScreenState extends State<SearchEquipmentsScreen> {
     );
   }
 
-  // FIX: imagen segura contra URLs rotas o vacías
-  Widget _buildImage(String? url) {
-    if (url == null ||
-        url.isEmpty ||
-        url.startsWith('file://') ||
-        url.trim() == '') {
-      return Container(
-        width: 70,
-        height: 70,
-        color: Colors.grey[800],
-        child:
-            const Icon(Icons.fitness_center, color: Colors.white54, size: 32),
-      );
-    }
+  Widget _buildEquipmentTile(Map<String, dynamic> eq, String name,
+      String muscles, String? imgUrl, String? docId) {
+    final bool isCustom = eq['isCustom'] == true;
 
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(16),
+        border: isCustom ? Border.all(color: Colors.orange, width: 2) : null,
+      ),
+      child: Row(
+        children: [
+          // Image
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: _buildImage(imgUrl),
+          ),
+          const SizedBox(width: 12),
+
+          // Name + Star + Delete
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isCustom) ...[
+                            const Icon(Icons.star,
+                                color: Colors.orange, size: 20),
+                            const SizedBox(width: 8),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text("Muscles: $muscles",
+                          style: const TextStyle(
+                              color: Colors.white60, fontSize: 12)),
+                    ],
+                  ),
+                ),
+
+                // Delete icon (solo custom)
+                if (isCustom)
+                  GestureDetector(
+                    onTap: () => _deleteCustomEquipment(docId!),
+                    child: const Icon(Icons.delete_outline,
+                        color: Colors.red, size: 26),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImage(String? url) {
+    if (url == null || url.isEmpty || url.startsWith('file://')) {
+      return Container(
+          width: 70,
+          height: 70,
+          color: Colors.grey[800],
+          child: const Icon(Icons.fitness_center, color: Colors.white54));
+    }
     return Image.network(
       url,
       width: 70,
       height: 70,
       fit: BoxFit.cover,
       errorBuilder: (_, __, ___) => Container(
-        width: 70,
-        height: 70,
-        color: Colors.grey[800],
-        child:
-            const Icon(Icons.fitness_center, color: Colors.white54, size: 32),
-      ),
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
-        return Container(
           width: 70,
           height: 70,
           color: Colors.grey[800],
-          child: const Center(
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
+          child: const Icon(Icons.fitness_center, color: Colors.white54)),
+      loadingBuilder: (context, child, progress) => progress == null
+          ? child
+          : Container(
+              width: 70,
+              height: 70,
+              color: Colors.grey[800],
+              child: const Center(
                   child: CircularProgressIndicator(
                       color: Colors.orange, strokeWidth: 2))),
-        );
-      },
     );
   }
 }
