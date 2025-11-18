@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../widgets/workout_card.dart';
 import 'search_exercises.dart';
+import 'search_equipments.dart';
+import '../widgets/this_week_records.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -174,11 +176,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Equipment search coming soon!"),
-                      backgroundColor: Colors.orange,
-                    ),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SearchEquipmentsScreen()),
                   );
                 },
               ),
@@ -186,6 +186,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+      return;
+    }
+    if (index == 4) {
+      Navigator.pushNamed(context, '/profile_settings');
       return;
     }
 
@@ -243,7 +247,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: WorkoutCard(),
               ),
 
-              const SizedBox(height: 100), // extra space for bottom nav
+              const SizedBox(height: 20),
+              const ThisWeekRecords(),
+// Mantén un poco de espacio para el bottom nav
+              const SizedBox(height: 80),
             ],
           ),
         ),
