@@ -18,51 +18,68 @@ class ThisWeekRecords extends StatelessWidget {
 
     final startOfLastWeek = startOfThisWeek.subtract(const Duration(days: 7));
 
-    final thisWeekStartStr =
-        "${startOfThisWeek.year}-${startOfThisWeek.month.toString().padLeft(2, '0')}-${startOfThisWeek.day.toString().padLeft(2, '0')}";
-
     try {
+      debugPrint(
+          "ThisWeekRecords: Esta semana ${startOfThisWeek.toString().split(' ').first} → ${endOfThisWeek.toString().split(' ').first}");
+
       final thisWeekSnapshot = await FirebaseFirestore.instance
           .collection('workouts')
           .where('uid', isEqualTo: user.uid)
-          .where('date', isGreaterThanOrEqualTo: thisWeekStartStr)
+          .where('completedAt',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfThisWeek))
+          .where('completedAt', isLessThan: Timestamp.fromDate(endOfThisWeek))
           .get();
 
       final lastWeekSnapshot = await FirebaseFirestore.instance
           .collection('workouts')
           .where('uid', isEqualTo: user.uid)
-          .where('date',
-              isGreaterThanOrEqualTo:
-                  "${startOfLastWeek.year}-${startOfLastWeek.month.toString().padLeft(2, '0')}-${startOfLastWeek.day.toString().padLeft(2, '0')}")
-          .where('date', isLessThan: thisWeekStartStr)
+          .where('completedAt',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfLastWeek))
+          .where('completedAt', isLessThan: Timestamp.fromDate(startOfThisWeek))
           .get();
 
       double volumeThis = 0, volumeLast = 0;
       int repsThis = 0, repsLast = 0;
       int setsThis = 0, setsLast = 0;
       int durationThis = 0, durationLast = 0;
+      int workoutsThisWeek = 0;
 
       Future<void> _process(QuerySnapshot snapshot, bool isThisWeek) async {
         for (var doc in snapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>; // ← CORREGIDO AQUÍ
           final loggedSetsSnap =
               await doc.reference.collection('logged_sets').get();
-          final duration = (doc['duration'] as num?)?.toInt() ?? 0;
+          if (loggedSetsSnap.docs.isEmpty) {
+            debugPrint("IGNORADO workout ${doc.id}: sin logged_sets");
+            continue;
+          }
+
+          final duration = (data['duration'] as num?)?.toInt() ?? 0;
+          final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
+
+          debugPrint(
+              "PROCESADO workout ${doc.id} → ${completedAt?.toString().split(' ').first} | ${loggedSetsSnap.docs.length} sets");
+
+          if (isThisWeek) {
+            workoutsThisWeek++;
+            durationThis += duration;
+          } else {
+            durationLast += duration;
+          }
 
           for (var set in loggedSetsSnap.docs) {
-            final data = set.data();
-            final w = (data['weight'] as num?)?.toDouble() ?? 0;
-            final r = (data['reps'] as num?)?.toInt() ?? 0;
+            final s = set.data() as Map<String, dynamic>;
+            final w = (s['weight'] as num?)?.toDouble() ?? 0;
+            final r = (s['reps'] as num?)?.toInt() ?? 0;
 
             if (isThisWeek) {
               volumeThis += w * r;
               repsThis += r;
               setsThis++;
-              durationThis += duration;
             } else {
               volumeLast += w * r;
               repsLast += r;
               setsLast++;
-              durationLast += duration;
             }
           }
         }
@@ -71,7 +88,8 @@ class ThisWeekRecords extends StatelessWidget {
       await _process(thisWeekSnapshot, true);
       await _process(lastWeekSnapshot, false);
 
-      final workoutsThisWeek = thisWeekSnapshot.docs.length;
+      debugPrint(
+          "RESULTADO: $workoutsThisWeek workouts esta semana | Volumen: ${volumeThis.toStringAsFixed(0)} Kg");
 
       return {
         'volume': volumeThis,
@@ -84,8 +102,8 @@ class ThisWeekRecords extends StatelessWidget {
         'durationDiff': durationThis - durationLast,
         'workoutsThisWeek': workoutsThisWeek,
       };
-    } catch (e) {
-      debugPrint("ERROR: $e");
+    } catch (e, s) {
+      debugPrint("ERROR en ThisWeekRecords: $e\n$s");
       return _emptyStats();
     }
   }
