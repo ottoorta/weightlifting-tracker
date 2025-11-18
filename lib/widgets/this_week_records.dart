@@ -11,71 +11,86 @@ class ThisWeekRecords extends StatelessWidget {
     if (user == null) return _emptyStats();
 
     final now = DateTime.now();
-    final startOfWeek = now
+    final startOfThisWeek = now
         .subtract(Duration(days: now.weekday - 1))
         .copyWith(hour: 0, minute: 0, second: 0, millisecond: 0);
-    final endOfWeek = startOfWeek.add(const Duration(days: 7));
+    final endOfThisWeek = startOfThisWeek.add(const Duration(days: 7));
 
-    final weekStartStr =
-        "${startOfWeek.year}-${startOfWeek.month.toString().padLeft(2, '0')}-${startOfWeek.day.toString().padLeft(2, '0')}";
-    final weekEndStr =
-        "${endOfWeek.year}-${endOfWeek.month.toString().padLeft(2, '0')}-${endOfWeek.day.toString().padLeft(2, '0')}";
+    final startOfLastWeek = startOfThisWeek.subtract(const Duration(days: 7));
+
+    final thisWeekStartStr =
+        "${startOfThisWeek.year}-${startOfThisWeek.month.toString().padLeft(2, '0')}-${startOfThisWeek.day.toString().padLeft(2, '0')}";
+    final lastWeekStartStr =
+        "${startOfLastWeek.year}-${startOfLastWeek.month.toString().padLeft(2, '0')}-${startOfLastWeek.day.toString().padLeft(2, '0')}";
 
     try {
-      debugPrint("Buscando workouts esta semana: $weekStartStr → $weekEndStr");
+      debugPrint("Esta semana: $thisWeekStartStr → ...");
+      debugPrint("Semana pasada: $lastWeekStartStr → $thisWeekStartStr");
 
-      final snapshot = await FirebaseFirestore.instance
+      // ESTA SEMANA
+      final thisWeekSnapshot = await FirebaseFirestore.instance
           .collection('workouts')
           .where('uid', isEqualTo: user.uid)
-          .where('date', isGreaterThanOrEqualTo: weekStartStr)
-          .where('date', isLessThan: weekEndStr)
+          .where('date', isGreaterThanOrEqualTo: thisWeekStartStr)
           .get();
 
-      debugPrint("Workouts encontrados esta semana: ${snapshot.docs.length}");
+      // SEMANA PASADA
+      final lastWeekSnapshot = await FirebaseFirestore.instance
+          .collection('workouts')
+          .where('uid', isEqualTo: user.uid)
+          .where('date', isGreaterThanOrEqualTo: lastWeekStartStr)
+          .where('date', isLessThan: thisWeekStartStr)
+          .get();
 
-      double volume = 0;
-      int reps = 0;
-      int sets = 0;
-      int duration = 0;
+      debugPrint("Esta semana: ${thisWeekSnapshot.docs.length} workouts");
+      debugPrint("Semana pasada: ${lastWeekSnapshot.docs.length} workouts");
 
-      for (var doc in snapshot.docs) {
-        final workoutId = doc.id;
-        debugPrint("Procesando workout: $workoutId");
+      double volumeThis = 0, volumeLast = 0;
+      int repsThis = 0, repsLast = 0;
+      int setsThis = 0, setsLast = 0;
+      int durationThis = 0, durationLast = 0;
 
-        final loggedSetsSnap =
-            await doc.reference.collection('logged_sets').get();
-        debugPrint(
-            "  → logged_sets encontrados: ${loggedSetsSnap.docs.length}");
+      Future<void> _processWeek(QuerySnapshot snapshot, bool isThisWeek) async {
+        for (var doc in snapshot.docs) {
+          final loggedSetsSnap =
+              await doc.reference.collection('logged_sets').get();
+          final duration = (doc['duration'] as num?)?.toInt() ?? 0;
 
-        final workoutDuration = (doc['duration'] as num?)?.toInt() ?? 0;
-        duration += workoutDuration;
+          for (var setDoc in loggedSetsSnap.docs) {
+            final data = setDoc.data();
+            final weight = (data['weight'] as num?)?.toDouble() ?? 0;
+            final reps = (data['reps'] as num?)?.toInt() ?? 0;
 
-        for (var setDoc in loggedSetsSnap.docs) {
-          final data = setDoc.data();
-          final weight = (data['weight'] as num?)?.toDouble() ?? 0;
-          final r = (data['reps'] as num?)?.toInt() ?? 0;
-
-          volume += weight * r;
-          reps += r;
-          sets++;
+            if (isThisWeek) {
+              volumeThis += weight * reps;
+              repsThis += reps;
+              setsThis++;
+              durationThis += duration;
+            } else {
+              volumeLast += weight * reps;
+              repsLast += reps;
+              setsLast++;
+              durationLast += duration;
+            }
+          }
         }
       }
 
-      final workoutsThisWeek = snapshot.docs.length;
+      await _processWeek(thisWeekSnapshot, true);
+      await _processWeek(lastWeekSnapshot, false);
+
+      final workoutsThisWeek = thisWeekSnapshot.docs.length;
       final workoutsLeft = 3 - workoutsThisWeek;
 
-      debugPrint(
-          "RESULTADO FINAL → Volumen: $volume KG | Reps: $reps | Sets: $sets | Tiempo: $duration min");
-
       return {
-        'volume': volume,
-        'volumeDiff': 0.0,
-        'reps': reps,
-        'repsDiff': 0,
-        'sets': sets,
-        'setsDiff': 0,
-        'duration': duration,
-        'durationDiff': 0,
+        'volume': volumeThis,
+        'volumeDiff': volumeThis - volumeLast,
+        'reps': repsThis,
+        'repsDiff': repsThis - repsLast,
+        'sets': setsThis,
+        'setsDiff': setsThis - setsLast,
+        'duration': durationThis,
+        'durationDiff': durationThis - durationLast,
         'workoutsLeft': workoutsLeft.clamp(0, 3),
       };
     } catch (e, s) {
@@ -103,6 +118,19 @@ class ThisWeekRecords extends StatelessWidget {
     return h > 0 ? "${h}h ${m}min" : "${m}min";
   }
 
+  String _formatChange(dynamic diff, {bool isDuration = false}) {
+    if (diff == 0) return "0";
+    final abs = diff.abs();
+    final prefix = diff > 0 ? "+" : "-";
+    if (isDuration) {
+      final h = abs ~/ 60;
+      final m = abs % 60;
+      final time = h > 0 ? "${h}h ${m}min" : "${m}min";
+      return "$prefix$time";
+    }
+    return "$prefix$abs";
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, dynamic>>(
@@ -118,9 +146,10 @@ class ThisWeekRecords extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                  color: Colors.orange.withOpacity(0.3),
-                  blurRadius: 20,
-                  spreadRadius: 1),
+                color: Colors.orange.withOpacity(0.3),
+                blurRadius: 20,
+                spreadRadius: 1,
+              ),
             ],
           ),
           child: Column(
@@ -128,9 +157,10 @@ class ThisWeekRecords extends StatelessWidget {
               const Text(
                 "This Week’s Records",
                 style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold),
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 16),
               Row(
@@ -138,15 +168,15 @@ class ThisWeekRecords extends StatelessWidget {
                   _StatBox(
                     title: "Volume Lifted",
                     value: "${stats['volume'].toStringAsFixed(0)} KG",
-                    change: "+0",
-                    isUp: true,
+                    change: _formatChange(stats['volumeDiff']),
+                    isUp: stats['volumeDiff'] >= 0,
                   ),
                   const SizedBox(width: 12),
                   _StatBox(
                     title: "Reps Completed",
                     value: stats['reps'].toString(),
-                    change: "+0",
-                    isUp: true,
+                    change: _formatChange(stats['repsDiff']),
+                    isUp: stats['repsDiff'] >= 0,
                   ),
                 ],
               ),
@@ -156,15 +186,16 @@ class ThisWeekRecords extends StatelessWidget {
                   _StatBox(
                     title: "Workout Time",
                     value: _formatDuration(stats['duration']),
-                    change: "+0h 0min",
-                    isUp: true,
+                    change:
+                        _formatChange(stats['durationDiff'], isDuration: true),
+                    isUp: stats['durationDiff'] >= 0,
                   ),
                   const SizedBox(width: 12),
                   _StatBox(
                     title: "Sets Completed",
                     value: stats['sets'].toString(),
-                    change: "+0",
-                    isUp: true,
+                    change: _formatChange(stats['setsDiff']),
+                    isUp: stats['setsDiff'] >= 0,
                   ),
                 ],
               ),
@@ -204,8 +235,10 @@ class _StatBox extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              title,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
             const SizedBox(height: 6),
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -214,9 +247,10 @@ class _StatBox extends StatelessWidget {
                   Text(
                     value,
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold),
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   Icon(
@@ -227,7 +261,9 @@ class _StatBox extends StatelessWidget {
                   Text(
                     change,
                     style: TextStyle(
-                        color: isUp ? Colors.green : Colors.red, fontSize: 13),
+                      color: isUp ? Colors.green : Colors.red,
+                      fontSize: 13,
+                    ),
                   ),
                 ],
               ),
