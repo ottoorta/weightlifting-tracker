@@ -247,7 +247,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: WorkoutCard(),
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(
+                  height:
+                      10), //espacio entre widget your next workout y this weeks records
               const ThisWeekRecords(),
 // Mantén un poco de espacio para el bottom nav
               const SizedBox(height: 80),

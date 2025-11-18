@@ -25,6 +25,11 @@ import 'screens/edit_custom_exercise.dart';
 import 'screens/exercise_statistics.dart';
 import 'screens/search_exercises.dart';
 import 'screens/exercise_details.dart';
+import 'screens/search_equipments.dart';
+import 'screens/add_custom_exercise.dart';
+import 'screens/add_custom_equipment.dart';
+import 'screens/profile_settings.dart';
+import 'screens/workout_records_calendar.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,6 +66,7 @@ class IronCoachApp extends StatelessWidget {
         '/first_inputs': (context) => const FirstUserInputsScreen(),
         '/your_gym': (context) => const YourGymScreen(),
         '/forging_exp': (context) => const ForgingExpScreen(),
+        '/add_custom_equipment': (context) => const AddCustomEquipmentScreen(),
         '/confirm': (context) => ConfirmationCodeScreen(
               email: ModalRoute.of(context)!.settings.arguments as String,
             ),
@@ -80,11 +86,15 @@ class IronCoachApp extends StatelessWidget {
           final args = ModalRoute.of(context)!.settings.arguments as String;
           return AddExercisesScreen(workoutId: args);
         },
+        '/search_equipments': (context) => SearchEquipmentsScreen(),
         '/exercise_details': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
               as Map<String, dynamic>;
           return ExerciseDetailsScreen(exercise: args['exercise']);
         },
+        '/workout_records_calendar': (context) =>
+            const WorkoutRecordsCalendarScreen(),
+        '/profile_settings': (context) => const ProfileSettingsScreen(),
         '/workout_main': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
               as Map<String, dynamic>;
@@ -119,6 +129,7 @@ class IronCoachApp extends StatelessWidget {
             exercise: args['exercise'],
           );
         },
+        '/add_custom_exercise': (context) => const AddCustomExerciseScreen(),
         '/search_exercises': (context) => const SearchExercisesScreen(),
         '/subscriptions': (context) => const Scaffold(
               body: Center(
