@@ -75,11 +75,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       builder: (context, child) => Theme(
         data: ThemeData.dark().copyWith(
           colorScheme: const ColorScheme.dark(
-            primary: Colors.orange,
-            onPrimary: Colors.white,
-            surface: Color(0xFF1C1C1E),
-            onSurface: Colors.white,
-          ),
+              primary: Colors.orange,
+              onPrimary: Colors.white,
+              surface: Color(0xFF1C1C1E),
+              onSurface: Colors.white),
           dialogBackgroundColor: const Color(0xFF1C1C1E),
         ),
         child: child!,
@@ -93,7 +92,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     }
   }
 
-  // === FORMATTERS: Muestran bonito ===
   String _formatWeightUnit(String? raw) {
     if (raw == null) return 'Kilograms - Kg';
     final lower = raw.toString().trim().toLowerCase();
@@ -125,7 +123,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     return 'Kilometers - Km';
   }
 
-  // === SHORT VALUES: Lo que se guarda en Firestore ===
   String _shortWeightUnit(String display) =>
       display.contains('Pounds') ? 'LBS' : 'KG';
   String _shortMeasureUnit(String display) =>
@@ -145,7 +142,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       _showDatePicker();
       return;
     }
-
     final controller = TextEditingController(text: currentValue);
     String? selected = options != null ? currentValue : null;
 
@@ -160,10 +156,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 dropdownColor: const Color(0xFF1C1C1E),
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  filled: true,
-                  fillColor: Color(0xFF2C2C2E),
-                  border: OutlineInputBorder(borderSide: BorderSide.none),
-                ),
+                    filled: true,
+                    fillColor: Color(0xFF2C2C2E),
+                    border: OutlineInputBorder(borderSide: BorderSide.none)),
                 items: options
                     .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                     .toList(),
@@ -174,10 +169,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 keyboardType: keyboardType,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  filled: true,
-                  fillColor: Color(0xFF2C2C2E),
-                  border: OutlineInputBorder(borderSide: BorderSide.none),
-                ),
+                    filled: true,
+                    fillColor: Color(0xFF2C2C2E),
+                    border: OutlineInputBorder(borderSide: BorderSide.none)),
               ),
         actions: [
           TextButton(
@@ -189,7 +183,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               String? value;
               if (options != null) {
                 value = selected;
-                // GUARDAR VALOR CORTO
                 if (field == 'weightUnit') value = _shortWeightUnit(selected!);
                 if (field == 'measureUnit')
                   value = _shortMeasureUnit(selected!);
@@ -198,7 +191,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               } else {
                 value = controller.text.trim();
               }
-
               if (value != null &&
                   value != currentValue &&
                   value.toString().isNotEmpty) {
@@ -216,23 +208,46 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   Widget _buildEditTile(String label, String value, String field,
       {TextInputType? keyboardType,
       List<String>? options,
-      bool isDate = false}) {
+      bool isDate = false,
+      bool editable = true}) {
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 4), // REDUCIDO
       leading: Text(label,
           style: const TextStyle(color: Colors.white70, fontSize: 14)),
       title: Text(value,
           style: const TextStyle(
               color: Colors.white, fontWeight: FontWeight.w500)),
-      trailing: const Icon(Icons.edit, color: Colors.orange, size: 20),
-      onTap: () => _showEditDialog(
-        title: label,
-        currentValue: value,
-        field: field,
-        keyboardType: keyboardType,
-        options: options,
-        isDate: isDate,
-      ),
+      trailing: editable
+          ? const Icon(Icons.edit, color: Colors.orange, size: 20)
+          : null,
+      onTap: editable
+          ? () => _showEditDialog(
+              title: label,
+              currentValue: value,
+              field: field,
+              keyboardType: keyboardType,
+              options: options,
+              isDate: isDate)
+          : null,
+    );
+  }
+
+  void _showTerms() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) =>
+          _InfoDialog(title: "Terms and Conditions", content: _termsText),
+    );
+  }
+
+  void _showPrivacy() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) =>
+          _InfoDialog(title: "Privacy Policy", content: _privacyText),
     );
   }
 
@@ -309,7 +324,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               ),
             ),
             const SizedBox(height: 30),
-            const Divider(color: Colors.white24),
+            const Divider(color: Colors.white24, height: 1),
+
             _buildEditTile("Gender", userData['gender'] ?? 'Not set', 'gender',
                 options: ['Male', 'Female', 'Other']),
             _buildEditTile("Date of Birth", birthDateDisplay, 'birthDate',
@@ -340,29 +356,33 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   'Gain Weight',
                   'Lean'
                 ]),
-            _buildEditTile("Email", user.email!, 'email'),
+            _buildEditTile("Email", user.email!, 'email',
+                editable: false), // NO EDITABLE
             _buildEditTile(
                 "Language", userData['language'] ?? 'English (EN)', 'language',
                 options: ['English (EN)', 'Español (ES)']),
             _buildEditTile("Subscription", userData['subscription'] ?? 'Basic',
                 'subscription',
                 options: ['Basic', 'Pro', 'Premium']),
-            const SizedBox(height: 30),
+
+            const Divider(color: Colors.white24, height: 40),
+
             ListTile(
                 leading: const Icon(Icons.description, color: Colors.orange),
                 title: const Text("Terms and Conditions",
                     style: TextStyle(color: Colors.white)),
-                onTap: () {}),
+                onTap: _showTerms),
             ListTile(
                 leading: const Icon(Icons.privacy_tip, color: Colors.orange),
                 title: const Text("Privacy Policy",
                     style: TextStyle(color: Colors.white)),
-                onTap: () {}),
+                onTap: _showPrivacy),
             ListTile(
                 leading: const Icon(Icons.mail, color: Colors.orange),
                 title: const Text("Contact Us",
                     style: TextStyle(color: Colors.white)),
                 onTap: () {}),
+
             const SizedBox(height: 40),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -389,3 +409,100 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 }
+
+// POPUP REUTILIZABLE
+class _InfoDialog extends StatelessWidget {
+  final String title;
+  final String content;
+  const _InfoDialog({required this.title, required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold)),
+                IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                    onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 400,
+              child: SingleChildScrollView(
+                child: Text(content,
+                    style: const TextStyle(color: Colors.white70, height: 1.5)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// TEXTOS REALES
+const String _termsText = """
+IRON COACH - TERMS AND CONDITIONS
+
+1. Acceptance of Terms
+By using Iron Coach, you agree to these Terms and Conditions.
+
+2. User Account
+You are responsible for maintaining the confidentiality of your account.
+
+3. Content
+You retain ownership of your custom exercises and equipment.
+
+4. Subscription
+Basic features are free. Premium features require payment.
+
+5. Termination
+We may terminate or suspend your account at any time.
+
+6. Changes
+We reserve the right to modify these terms at any time.
+
+Last updated: November 2025
+""";
+
+const String _privacyText = """
+IRON COACH - PRIVACY POLICY
+
+1. Information We Collect
+- Account information (email, name, profile data)
+- Workout and exercise history
+- Device information
+
+2. How We Use Your Information
+- To provide and improve the app
+- To personalize your experience
+- To send important notifications
+
+3. Data Storage
+Your data is stored securely in Firebase.
+
+4. Data Sharing
+We do not sell your personal information.
+
+5. Your Rights
+You can delete your account and all data at any time.
+
+6. Contact
+For privacy questions: support@ironcoach.app
+
+Last updated: November 2025
+""";
