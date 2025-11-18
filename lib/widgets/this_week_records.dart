@@ -116,6 +116,7 @@ class ThisWeekRecords extends StatelessWidget {
         'sets': setsThis,
         'setsDiff': setsThis - setsLast,
         'duration': durationThis,
+        'workoutsThisWeek': workoutsThisWeek,
         'durationDiff': durationThis - durationLast,
         'workoutsLeft': workoutsLeft.clamp(0, 3),
       };
@@ -164,6 +165,8 @@ class ThisWeekRecords extends StatelessWidget {
       builder: (context, snapshot) {
         final stats = snapshot.data ?? _emptyStats();
 
+        final workoutsThisWeek = stats['workoutsThisWeek'] as int? ?? 0;
+
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           padding: const EdgeInsets.all(20),
@@ -172,50 +175,87 @@ class ThisWeekRecords extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                  color: Colors.orange.withOpacity(0.3),
-                  blurRadius: 20,
-                  spreadRadius: 1),
+                color: Colors.orange.withOpacity(0.3),
+                blurRadius: 20,
+                spreadRadius: 1,
+              ),
             ],
           ),
           child: Column(
+            mainAxisSize:
+                MainAxisSize.min, // Evita que ocupe más espacio del necesario
             children: [
-              const Text("This Week’s Records",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold)),
+              // Título centrado
+              const Text(
+                "This Week’s Records",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 16),
-              Row(children: [
-                _StatBox(
-                    title: "Volume Lifted",
-                    value: "${stats['volume'].toStringAsFixed(0)} KG",
-                    change: _formatChange(stats['volumeDiff']),
-                    isUp: stats['volumeDiff'] >= 0),
-                const SizedBox(width: 12),
-                _StatBox(
-                    title: "Reps Completed",
-                    value: stats['reps'].toString(),
-                    change: _formatChange(stats['repsDiff']),
-                    isUp: stats['repsDiff'] >= 0),
-              ]),
+
+              // Primera fila
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatBox(
+                      title: "Volume Lifted",
+                      value: "${stats['volume'].toStringAsFixed(0)} KG",
+                      change: _formatChange(stats['volumeDiff']),
+                      isUp: stats['volumeDiff'] >= 0,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatBox(
+                      title: "Reps Completed",
+                      value: stats['reps'].toString(),
+                      change: _formatChange(stats['repsDiff']),
+                      isUp: stats['repsDiff'] >= 0,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
-              Row(children: [
-                _StatBox(
-                    title: "Workout Time",
-                    value: _formatDuration(stats['duration']),
-                    change:
-                        _formatChange(stats['durationDiff'], isDuration: true),
-                    isUp: stats['durationDiff'] >= 0),
-                const SizedBox(width: 12),
-                _StatBox(
-                    title: "Sets Completed",
-                    value: stats['sets'].toString(),
-                    change: _formatChange(stats['setsDiff']),
-                    isUp: stats['setsDiff'] >= 0),
-              ]),
+
+              // Segunda fila
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatBox(
+                      title: "Workout Time",
+                      value: _formatDuration(stats['duration']),
+                      change: _formatChange(stats['durationDiff'],
+                          isDuration: true),
+                      isUp: stats['durationDiff'] >= 0,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatBox(
+                      title: "Sets Completed",
+                      value: stats['sets'].toString(),
+                      change: _formatChange(stats['setsDiff']),
+                      isUp: stats['setsDiff'] >= 0,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
-              Text("${stats['workoutsLeft']} Workouts left this week",
-                  style: const TextStyle(color: Colors.white70, fontSize: 16)),
+
+              // Workouts completados
+              Text(
+                "$workoutsThisWeek Workouts completed this week",
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ],
           ),
         );
