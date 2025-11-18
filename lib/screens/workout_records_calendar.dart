@@ -20,7 +20,8 @@ class _WorkoutRecordsCalendarScreenState
 
   String _selectedRange = 'Week';
   Set<DateTime> _workoutDays = {};
-  Map<String, dynamic> _stats = {};
+  Map<String, dynamic> _currentStats = {};
+  Map<String, dynamic> _previousStats = {};
 
   @override
   void initState() {
@@ -33,98 +34,187 @@ class _WorkoutRecordsCalendarScreenState
     if (user == null) return;
 
     final now = DateTime.now();
-    DateTime startDate;
+    DateTime currentStart, currentEnd, previousStart, previousEnd;
 
     switch (_selectedRange) {
       case 'Week':
-        startDate = now.subtract(Duration(days: now.weekday - 1));
+        // Esta semana: lunes a domingo
+        currentStart = now
+            .subtract(Duration(days: now.weekday - 1))
+            .copyWith(hour: 0, minute: 0, second: 0);
+        currentEnd =
+            currentStart.add(const Duration(days: 7)); // Domingo 23:59:59
+        previousStart = currentStart.subtract(const Duration(days: 7));
+        previousEnd = currentStart;
         break;
       case 'Month':
-        startDate = DateTime(now.year, now.month, 1);
+        currentStart = DateTime(now.year, now.month, 1);
+        currentEnd =
+            DateTime(now.year, now.month + 1, 1); // Primer día del próximo mes
+        previousStart = DateTime(now.year, now.month - 1, 1);
+        previousEnd = currentStart;
         break;
       case 'Year':
-        startDate = DateTime(now.year, 1, 1);
+        currentStart = DateTime(now.year, 1, 1);
+        currentEnd = DateTime(now.year + 1, 1, 1);
+        previousStart = DateTime(now.year - 1, 1, 1);
+        previousEnd = currentStart;
         break;
       default:
-        startDate = DateTime(2020);
+        currentStart = DateTime(2020);
+        currentEnd = DateTime.now().add(const Duration(days: 365));
+        previousStart = DateTime(2020);
+        previousEnd = currentEnd;
     }
 
-    startDate = startDate.copyWith(hour: 0, minute: 0, second: 0);
+    final current = await _fetchStats(currentStart, currentEnd);
+    final previous = _selectedRange == 'All Time'
+        ? {}
+        : await _fetchStats(previousStart, previousEnd);
 
-    debugPrint("CARGANDO DATOS para rango: $_selectedRange");
-    debugPrint("Desde: ${startDate.toString()}");
+    setState(() {
+      _currentStats = current['stats'];
+      _workoutDays = current['days'];
+      _previousStats = previous['stats'] ?? {};
+    });
+  }
+
+  Future<Map<String, dynamic>> _fetchStats(DateTime start, DateTime end) async {
+    final user = FirebaseAuth.instance.currentUser!;
+
+    final endExclusive = end
+        .copyWith(hour: 0, minute: 0, second: 0)
+        .add(const Duration(days: 1));
+
+    debugPrint(
+        "RANGO: ${start.toString().split(' ').first} → ${endExclusive.toString().split(' ').first}");
 
     final snapshot = await FirebaseFirestore.instance
         .collection('workouts')
         .where('uid', isEqualTo: user.uid)
+        .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+        .where('completedAt', isLessThan: Timestamp.fromDate(endExclusive))
         .get();
 
     final days = <DateTime>{};
     double volume = 0;
     int reps = 0, sets = 0, duration = 0, workouts = 0;
 
+    double maxWeight = 0;
+    double maxVolumeInSession = 0;
+    int maxRepsInSession = 0;
+
     for (var doc in snapshot.docs) {
       final data = doc.data();
       final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
+      if (completedAt == null) continue;
 
-      if (completedAt == null) {
-        debugPrint("IGNORADO workout ${doc.id}: sin completedAt");
-        continue;
-      }
-
-      if (completedAt.isBefore(startDate)) {
-        debugPrint(
-            "IGNORADO workout ${doc.id}: fuera del rango (${completedAt.toString().split(' ').first})");
-        continue;
-      }
+      final dateOnly =
+          DateTime(completedAt.year, completedAt.month, completedAt.day);
+      days.add(dateOnly);
 
       final loggedSetsSnap =
           await doc.reference.collection('logged_sets').get();
-      if (loggedSetsSnap.docs.isEmpty) {
-        debugPrint("IGNORADO workout ${doc.id}: sin logged_sets");
-        continue;
-      }
-
-      debugPrint(
-          "PROCESANDO workout ${doc.id} del ${completedAt.toString().split(' ').first} | ${loggedSetsSnap.docs.length} sets");
-
-      days.add(DateTime(completedAt.year, completedAt.month, completedAt.day));
-      workouts++;
+      if (loggedSetsSnap.docs.isEmpty) continue;
 
       final workoutDuration = (data['duration'] as num?)?.toInt() ?? 0;
       duration += workoutDuration;
+      workouts++;
 
+      double sessionVolume = 0;
       for (var set in loggedSetsSnap.docs) {
         final s = set.data();
         final w = (s['weight'] as num?)?.toDouble() ?? 0;
         final r = (s['reps'] as num?)?.toInt() ?? 0;
+
+        // Cálculos generales
         volume += w * r;
         reps += r;
         sets++;
+
+        // Máximos
+        if (w > maxWeight) maxWeight = w;
+        if (r > maxRepsInSession) maxRepsInSession = r;
+        sessionVolume += w * r;
+      }
+
+      // Máximo volumen por sesión
+      if (sessionVolume > maxVolumeInSession) {
+        maxVolumeInSession = sessionVolume;
       }
     }
 
-    debugPrint("RESULTADO FINAL:");
-    debugPrint("  Workouts: $workouts");
-    debugPrint("  Volumen: ${volume.toStringAsFixed(1)} Kg");
-    debugPrint("  Reps: $reps | Sets: $sets | Tiempo: $duration min");
-
-    setState(() {
-      _workoutDays = days;
-      _stats = {
+    return {
+      'days': days,
+      'stats': {
         'workouts': workouts,
         'volume': volume,
         'reps': reps,
         'sets': sets,
         'duration': duration,
-      };
-    });
+        'maxWeight': maxWeight,
+        'maxVolumeSession': maxVolumeInSession,
+        'maxRepsSession': maxRepsInSession,
+      }
+    };
   }
 
   String _formatDuration(int minutes) {
     final h = minutes ~/ 60;
     final m = minutes % 60;
     return h > 0 ? "$h Hrs $m mins" : "$m mins";
+  }
+
+  String _getComparisonText(dynamic current, dynamic previous,
+      {bool isDuration = false}) {
+    final diff = (current ?? 0) - (previous ?? 0);
+    if (diff == 0) return "same as last period";
+    final abs = diff.abs();
+    final prefix = diff > 0 ? "+" : "-";
+    if (isDuration) {
+      final h = abs ~/ 60;
+      final m = abs % 60;
+      final time = h > 0 ? "${h}h ${m}min" : "${m}min";
+      return "$prefix$time ${diff > 0 ? "more" : "less"} than last period";
+    }
+    return "$prefix$abs ${diff > 0 ? "more" : "less"} than last period";
+  }
+
+  // ← CORREGIDO: nombre correcto
+  Widget _buildStat(String title, String value, String comparison) {
+    final isUp = !comparison.contains("less") && !comparison.contains("same");
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(color: Colors.white70, fontSize: 14)),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(value,
+                  style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  Icon(isUp ? Icons.trending_up : Icons.trending_down,
+                      color: isUp ? Colors.green : Colors.red, size: 18),
+                  const SizedBox(width: 4),
+                  Text(comparison,
+                      style: TextStyle(
+                          color: isUp ? Colors.green : Colors.red,
+                          fontSize: 14)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -219,70 +309,54 @@ class _WorkoutRecordsCalendarScreenState
 
           const SizedBox(height: 20),
 
-          // Stats con valor + cambio en la misma línea
+          // Stats con comparaciones reales
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               children: [
-                _buildStat("Workouts Performed", "${_stats['workouts'] ?? 0}",
-                    "8 compared to last month"),
-                _buildStat("Workout Time",
-                    _formatDuration(_stats['duration'] ?? 0), "10 mins less"),
                 _buildStat(
-                    "Max Weight Lifted", "21 Kg", "2 Kg compared to last week",
-                    isUp: true),
-                _buildStat("Max Volume in a session", "1,733 Kg",
-                    "352 Kg compared to last week",
-                    isUp: true),
+                    "Workouts Performed",
+                    "${_currentStats['workouts'] ?? 0}",
+                    _getComparisonText(
+                        _currentStats['workouts'], _previousStats['workouts'])),
+                _buildStat(
+                    "Workout Time",
+                    _formatDuration(_currentStats['duration'] ?? 0),
+                    _getComparisonText(
+                        _currentStats['duration'], _previousStats['duration'],
+                        isDuration: true)),
                 _buildStat(
                     "Total Volume",
-                    "${(_stats['volume'] ?? 0).toStringAsFixed(0)} Kg",
-                    "1,352 Kg compared to last week",
-                    isUp: true),
-                _buildStat("Total Sets Completed", "${_stats['sets'] ?? 0}",
-                    "12 compared to last month"),
-                _buildStat("Total Reps Completed", "${_stats['reps'] ?? 0}",
-                    "25 compared to last month"),
-                _buildStat("Max Repetitions in a session", "18 Reps",
-                    "3 compared to last month"),
+                    "${(_currentStats['volume'] ?? 0).toStringAsFixed(0)} Kg",
+                    _getComparisonText(
+                        _currentStats['volume'], _previousStats['volume'])),
+                _buildStat(
+                    "Total Sets Completed",
+                    "${_currentStats['sets'] ?? 0}",
+                    _getComparisonText(
+                        _currentStats['sets'], _previousStats['sets'])),
+                _buildStat(
+                    "Total Reps Completed",
+                    "${_currentStats['reps'] ?? 0}",
+                    _getComparisonText(
+                        _currentStats['reps'], _previousStats['reps'])),
+                _buildStat(
+                    "Max Weight Lifted",
+                    "${_currentStats['maxWeight']?.toStringAsFixed(1) ?? 0} Kg",
+                    _getComparisonText(_currentStats['maxWeight'],
+                        _previousStats['maxWeight'])),
+                _buildStat(
+                    "Max Volume in a session",
+                    "${_currentStats['maxVolumeSession']?.toStringAsFixed(0) ?? 0} Kg",
+                    _getComparisonText(_currentStats['maxVolumeSession'],
+                        _previousStats['maxVolumeSession'])),
+                _buildStat(
+                    "Max Repetitions in a session",
+                    "${_currentStats['maxRepsSession'] ?? 0} Reps",
+                    _getComparisonText(_currentStats['maxRepsSession'],
+                        _previousStats['maxRepsSession'])),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStat(String title, String value, String change,
-      {bool isUp = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title,
-              style: const TextStyle(color: Colors.white70, fontSize: 14)),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(value,
-                  style: const TextStyle(
-                      color: Colors.orange,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold)),
-              Row(
-                children: [
-                  Icon(isUp ? Icons.trending_up : Icons.trending_down,
-                      color: isUp ? Colors.green : Colors.red, size: 18),
-                  const SizedBox(width: 4),
-                  Text(change,
-                      style: TextStyle(
-                          color: isUp ? Colors.green : Colors.red,
-                          fontSize: 14)),
-                ],
-              ),
-            ],
           ),
         ],
       ),
