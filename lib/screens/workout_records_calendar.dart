@@ -30,6 +30,8 @@ class _WorkoutRecordsCalendarScreenState
   List<DocumentSnapshot> _futureWorkouts = [];
   String _gymName = "Home Gym";
 
+  int _currentPastIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +101,7 @@ class _WorkoutRecordsCalendarScreenState
       _pastWorkouts = current['past'] ?? [];
       _futureWorkouts = current['future'] ?? [];
       _previousStats = previous['stats'] ?? {};
+      _currentPastIndex = 0;
     });
   }
 
@@ -108,11 +111,21 @@ class _WorkoutRecordsCalendarScreenState
         .copyWith(hour: 0, minute: 0, second: 0)
         .add(const Duration(days: 1));
 
-    final snapshot = await FirebaseFirestore.instance
+    final completedSnapshot = await FirebaseFirestore.instance
         .collection('workouts')
         .where('uid', isEqualTo: user.uid)
         .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
         .where('completedAt', isLessThan: Timestamp.fromDate(endExclusive))
+        .get();
+
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final futureSnapshot = await FirebaseFirestore.instance
+        .collection('workouts')
+        .where('uid', isEqualTo: user.uid)
+        .where('date',
+            isGreaterThanOrEqualTo:
+                "${todayStart.year}-${todayStart.month.toString().padLeft(2, '0')}-${todayStart.day.toString().padLeft(2, '0')}")
         .get();
 
     final days = <DateTime>{};
@@ -126,19 +139,16 @@ class _WorkoutRecordsCalendarScreenState
     final past = <DocumentSnapshot>[];
     final future = <DocumentSnapshot>[];
 
-    for (var doc in snapshot.docs) {
+    // Past Workouts (completados)
+    for (var doc in completedSnapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
-      final startTime = data['startTime'];
+      if (completedAt == null) continue;
 
-      if (completedAt != null) {
-        final dateOnly =
-            DateTime(completedAt.year, completedAt.month, completedAt.day);
-        days.add(dateOnly);
-        past.add(doc);
-      } else if (startTime == null) {
-        future.add(doc);
-      }
+      final dateOnly =
+          DateTime(completedAt.year, completedAt.month, completedAt.day);
+      days.add(dateOnly);
+      past.add(doc);
 
       final loggedSetsSnap =
           await doc.reference.collection('logged_sets').get();
@@ -168,6 +178,17 @@ class _WorkoutRecordsCalendarScreenState
       }
     }
 
+    // Future Workouts
+    for (var doc in futureSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final completedAt = data['completedAt'];
+      final startTime = data['startTime'];
+      if (completedAt == null && startTime == null) {
+        future.add(doc);
+        debugPrint("FUTURE WORKOUT: ${doc.id} → ${data['date']}");
+      }
+    }
+
     past.sort((a, b) {
       final aTime =
           (a['completedAt'] as Timestamp?)?.toDate() ?? DateTime(1970);
@@ -193,7 +214,22 @@ class _WorkoutRecordsCalendarScreenState
     };
   }
 
-  String _formatDuration(int minutes) {
+  Future<String> _getExerciseName(String exerciseId) async {
+    var doc = await FirebaseFirestore.instance
+        .collection('exercises')
+        .doc(exerciseId)
+        .get();
+    if (doc.exists) return doc['name'] ?? "Unknown Exercise";
+
+    doc = await FirebaseFirestore.instance
+        .collection('exercises_custom')
+        .doc(exerciseId)
+        .get();
+    return doc.exists ? (doc['name'] ?? "Custom Exercise") : "Unknown Exercise";
+  }
+
+  String _formatDuration(int? minutes) {
+    if (minutes == null || minutes == 0) return "To be completed";
     final h = minutes ~/ 60;
     final m = minutes % 60;
     return h > 0 ? "$h Hrs $m mins" : "$m mins";
@@ -216,6 +252,12 @@ class _WorkoutRecordsCalendarScreenState
 
   @override
   Widget build(BuildContext context) {
+    final currentWorkout = _currentPage == 0 && _pastWorkouts.isNotEmpty
+        ? _pastWorkouts[_currentPastIndex]
+        : (_currentPage == 2 && _futureWorkouts.isNotEmpty
+            ? _futureWorkouts[0]
+            : null);
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -229,7 +271,7 @@ class _WorkoutRecordsCalendarScreenState
       ),
       body: Column(
         children: [
-          // Botones Week/Month/Year/All Time
+          // Botones
           Container(
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -262,73 +304,77 @@ class _WorkoutRecordsCalendarScreenState
             ),
           ),
 
-          // SCROLL HORIZONTAL: Past ← Calendar → Future
+          // SCROLL HORIZONTAL
           Expanded(
             flex: 3,
             child: PageView(
               controller: _pageController,
               onPageChanged: (index) => setState(() => _currentPage = index),
               children: [
-                _buildWorkoutCard(
-                    _pastWorkouts.isNotEmpty ? _pastWorkouts[0] : null,
-                    isPast: true),
+                _buildWorkoutCard(currentWorkout, isPast: true),
                 _buildCalendar(),
-                _buildWorkoutCard(
-                    _futureWorkouts.isNotEmpty ? _futureWorkouts[0] : null,
-                    isPast: false),
+                _buildWorkoutCard(currentWorkout, isPast: false),
               ],
             ),
           ),
 
-          // TEXTO DINÁMICO: Back to Calendar si estás en Past o Future
+          // NAVEGACIÓN
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Izquierda
-                if (_currentPage == 0 || _currentPage == 2)
+                // IZQUIERDA
+                if (_currentPage == 1)
+                  GestureDetector(
+                    onTap: () {
+                      _currentPastIndex = 0;
+                      _pageController.animateToPage(0,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.ease);
+                    },
+                    child: const Row(children: [
+                      Icon(Icons.arrow_back_ios, color: Colors.orange),
+                      SizedBox(width: 4),
+                      Text("Past Workouts",
+                          style: TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ]),
+                  )
+                else if (_currentPage == 0 &&
+                    _currentPastIndex < _pastWorkouts.length - 1)
+                  GestureDetector(
+                    onTap: () => setState(() => _currentPastIndex++),
+                    child: const Row(children: [
+                      Icon(Icons.arrow_back_ios, color: Colors.orange),
+                      SizedBox(width: 4),
+                      Text("Past Workouts",
+                          style: TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ]),
+                  )
+                else if (_currentPage != 1)
                   GestureDetector(
                     onTap: () => _pageController.animateToPage(1,
                         duration: const Duration(milliseconds: 300),
                         curve: Curves.ease),
                     child: const Row(children: [
                       Icon(Icons.calendar_today, color: Colors.orange),
-                      Text(" Back to Calendar",
+                      SizedBox(width: 4),
+                      Text("Back to Calendar",
                           style: TextStyle(
                               color: Colors.orange,
-                              fontWeight: FontWeight.bold)),
-                    ]),
-                  )
-                else
-                  GestureDetector(
-                    onTap: () => _pageController.animateToPage(0,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.ease),
-                    child: const Row(children: [
-                      Icon(Icons.arrow_back_ios, color: Colors.orange),
-                      Text(" Past Workouts",
-                          style: TextStyle(
-                              color: Colors.orange,
-                              fontWeight: FontWeight.bold)),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
                     ]),
                   ),
 
-                // Derecha
-                if (_currentPage == 0 || _currentPage == 2)
-                  GestureDetector(
-                    onTap: () => _pageController.animateToPage(1,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.ease),
-                    child: const Row(children: [
-                      Text("Back to Calendar ",
-                          style: TextStyle(
-                              color: Colors.orange,
-                              fontWeight: FontWeight.bold)),
-                      Icon(Icons.calendar_today, color: Colors.orange),
-                    ]),
-                  )
-                else
+                // DERECHA
+                if (_currentPage == 1)
                   GestureDetector(
                     onTap: () => _pageController.animateToPage(2,
                         duration: const Duration(milliseconds: 300),
@@ -337,8 +383,25 @@ class _WorkoutRecordsCalendarScreenState
                       Text("Next Workouts ",
                           style: TextStyle(
                               color: Colors.orange,
-                              fontWeight: FontWeight.bold)),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                      SizedBox(width: 4),
                       Icon(Icons.arrow_forward_ios, color: Colors.orange),
+                    ]),
+                  )
+                else if (_currentPage == 0)
+                  GestureDetector(
+                    onTap: () => _pageController.animateToPage(1,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.ease),
+                    child: const Row(children: [
+                      Text("Back to Calendar ",
+                          style: TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                      SizedBox(width: 4),
+                      Icon(Icons.calendar_today, color: Colors.orange),
                     ]),
                   ),
               ],
@@ -358,7 +421,7 @@ class _WorkoutRecordsCalendarScreenState
                         _currentStats['workouts'], _previousStats['workouts'])),
                 _buildStat(
                     "Workout Time",
-                    _formatDuration(_currentStats['duration'] ?? 0),
+                    _formatDuration(_currentStats['duration']),
                     _getComparisonText(
                         _currentStats['duration'], _previousStats['duration'],
                         isDuration: true)),
@@ -444,14 +507,15 @@ class _WorkoutRecordsCalendarScreenState
   Widget _buildWorkoutCard(DocumentSnapshot? workout, {required bool isPast}) {
     if (workout == null) {
       return Center(
-          child: Text(isPast ? "No past workouts" : "No upcoming workouts",
-              style: const TextStyle(color: Colors.white70, fontSize: 18)));
+        child: Text(
+          isPast ? "No past workouts" : "No upcoming workouts",
+          style: const TextStyle(color: Colors.white70, fontSize: 18),
+        ),
+      );
     }
 
     final data = workout.data() as Map<String, dynamic>;
-    final completedAt =
-        (data['completedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-    final dateStr = "${_formatDate(completedAt)}";
+    final dateStr = data['date']?.toString() ?? "Unknown Date";
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -460,18 +524,21 @@ class _WorkoutRecordsCalendarScreenState
           color: const Color(0xFF1C1C1E),
           borderRadius: BorderRadius.circular(20)),
       child: FutureBuilder<Map<String, dynamic>>(
-        future: _loadWorkoutDetails(workout),
+        future: isPast
+            ? _loadPastWorkoutDetails(workout)
+            : _loadFutureWorkoutDetails(workout),
         builder: (context, snapshot) {
-          if (!snapshot.hasData)
+          if (!snapshot.hasData) {
             return const Center(
                 child: CircularProgressIndicator(color: Colors.orange));
+          }
 
           final details = snapshot.data!;
-          final sets = details['sets'] as List<Map<String, dynamic>>;
+          final exercises = details['exercises'] as List<Map<String, dynamic>>;
           final volume = details['volume'] as double;
-          final effort = _getEffort(
-              sets.map((s) => s['setDoc'] as DocumentSnapshot).toList());
+          final effort = details['effort'] as String;
           final muscles = details['muscles'] as String;
+          final duration = details['duration'] as int?;
 
           return SingleChildScrollView(
             child: Column(
@@ -486,24 +553,28 @@ class _WorkoutRecordsCalendarScreenState
                     style: const TextStyle(color: Colors.white70)),
                 Text("Effort: $effort",
                     style: TextStyle(
-                        color: effort == "High"
-                            ? Colors.red
-                            : effort == "Medium"
-                                ? Colors.orange
-                                : Colors.green,
-                        fontWeight: FontWeight.bold)),
+                      color: effort == "High"
+                          ? Colors.red
+                          : effort == "Medium"
+                              ? Colors.orange
+                              : Colors.green,
+                      fontWeight: FontWeight.bold,
+                    )),
                 Text("Volume: ${volume.toStringAsFixed(0)} Kg",
                     style: const TextStyle(color: Colors.white)),
-                Text("Exercises: ${sets.length}",
+                Text("Exercises: ${exercises.length}",
                     style: const TextStyle(color: Colors.white)),
-                Text(
-                    "Total time: ${_formatDuration((data['duration'] as num?)?.toInt() ?? 0)}",
+                Text("Total time: ${_formatDuration(duration)}",
                     style: const TextStyle(color: Colors.white)),
                 Text("Muscles: $muscles",
                     style: const TextStyle(color: Colors.white70)),
                 const SizedBox(height: 12),
-                ...sets.map((s) => Text("• ${s['name']}",
-                    style: const TextStyle(color: Colors.white70))),
+                ...exercises.map((e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text("• ${e['name']}",
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 15)),
+                    )),
               ],
             ),
           );
@@ -512,14 +583,21 @@ class _WorkoutRecordsCalendarScreenState
     );
   }
 
-  Future<Map<String, dynamic>> _loadWorkoutDetails(
+  Future<Map<String, dynamic>> _loadPastWorkoutDetails(
       DocumentSnapshot workout) async {
+    final data = workout.data() as Map<String, dynamic>;
+    final exerciseIds = List<String>.from(data['exerciseIds'] ?? []);
     final loggedSetsSnap =
         await workout.reference.collection('logged_sets').get();
+
     double volume = 0;
-    final List<Map<String, dynamic>> sets = [];
+    final List<Map<String, dynamic>> exercises = [];
     final Set<String> muscles = {};
 
+    // Mapa para contar sets por ejercicio
+    final Map<String, int> setCount = {};
+
+    // Calcular volumen y contar sets
     for (var setDoc in loggedSetsSnap.docs) {
       final s = setDoc.data() as Map<String, dynamic>;
       final exerciseId = s['exerciseId'] as String?;
@@ -527,74 +605,110 @@ class _WorkoutRecordsCalendarScreenState
       final r = (s['reps'] as num?)?.toInt() ?? 0;
       volume += w * r;
 
-      String name = "Unknown Exercise";
       if (exerciseId != null) {
-        final exDoc = await FirebaseFirestore.instance
+        setCount[exerciseId] = (setCount[exerciseId] ?? 0) + 1;
+      }
+    }
+
+    // Procesar cada exerciseId del workout
+    for (var id in exerciseIds) {
+      final exerciseId = id.toString();
+      if (setCount.containsKey(exerciseId) && setCount[exerciseId]! > 0) {
+        final name = await _getExerciseName(exerciseId);
+
+        // Buscar músculo principal
+        var doc = await FirebaseFirestore.instance
             .collection('exercises')
             .doc(exerciseId)
             .get();
-        if (exDoc.exists) {
-          name = exDoc['name'] ?? "Unknown";
-          final mList = exDoc['muscles'] as List<dynamic>?;
-          if (mList != null && mList.isNotEmpty) {
+        if (doc.exists) {
+          final mList = doc['muscles'] as List<dynamic>?;
+          if (mList != null && mList.isNotEmpty)
             muscles.add(mList[0].toString());
+        } else {
+          doc = await FirebaseFirestore.instance
+              .collection('exercises_custom')
+              .doc(exerciseId)
+              .get();
+          if (doc.exists) {
+            final mList = doc['muscles'] as List<dynamic>?;
+            if (mList != null && mList.isNotEmpty)
+              muscles.add(mList[0].toString());
           }
         }
-      }
 
-      sets.add({'name': name, 'setDoc': setDoc});
+        exercises.add({'name': name});
+      }
     }
 
-    return {
-      'sets': sets,
-      'volume': volume,
-      'muscles': muscles.isEmpty ? "Various" : muscles.join(", "),
-    };
-  }
-
-  String _getEffort(List<DocumentSnapshot> sets) {
-    if (sets.isEmpty) return "Medium";
+    // Calcular Effort basado en RIR
+    String effort = "Medium";
     double totalRir = 0;
-    int count = 0;
-    for (var set in sets) {
+    int rirCount = 0;
+    for (var set in loggedSetsSnap.docs) {
       final rir = (set['rir'] as num?)?.toDouble();
       if (rir != null) {
         totalRir += rir;
-        count++;
+        rirCount++;
       }
     }
-    if (count == 0) return "Medium";
-    final avg = totalRir / count;
-    if (avg <= 1) return "High";
-    if (avg <= 3) return "Medium";
-    return "Low";
+    if (rirCount > 0) {
+      final avg = totalRir / rirCount;
+      effort = avg <= 1
+          ? "High"
+          : avg <= 3
+              ? "Medium"
+              : "Low";
+    }
+
+    return {
+      'exercises': exercises,
+      'volume': volume,
+      'effort': effort,
+      'muscles': muscles.isEmpty ? "Various" : muscles.join(", "),
+      'duration': (data['duration'] as num?)?.toInt(),
+    };
   }
 
-  String _formatDate(DateTime date) {
-    final weekdays = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday'
-    ];
-    final months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-    return "${weekdays[date.weekday - 1]}, ${months[date.month - 1]} ${date.day} ${date.year}";
+  Future<Map<String, dynamic>> _loadFutureWorkoutDetails(
+      DocumentSnapshot workout) async {
+    final data = workout.data() as Map<String, dynamic>;
+    final exerciseIds = List<String>.from(data['exerciseIds'] ?? []);
+
+    final List<Map<String, dynamic>> exercises = [];
+    final Set<String> muscles = {};
+
+    for (var id in exerciseIds) {
+      final name = await _getExerciseName(id);
+      exercises.add({'name': name});
+
+      final doc = await FirebaseFirestore.instance
+          .collection('exercises')
+          .doc(id)
+          .get();
+      if (doc.exists) {
+        final mList = doc['muscles'] as List<dynamic>?;
+        if (mList != null && mList.isNotEmpty) muscles.add(mList[0].toString());
+      } else {
+        final customDoc = await FirebaseFirestore.instance
+            .collection('exercises_custom')
+            .doc(id)
+            .get();
+        if (customDoc.exists) {
+          final mList = customDoc['muscles'] as List<dynamic>?;
+          if (mList != null && mList.isNotEmpty)
+            muscles.add(mList[0].toString());
+        }
+      }
+    }
+
+    return {
+      'exercises': exercises,
+      'volume': 0.0,
+      'effort': "To be calculated",
+      'muscles': muscles.isEmpty ? "To be determined" : muscles.join(", "),
+      'duration': null,
+    };
   }
 
   Widget _buildStat(String title, String value, String comparison) {
