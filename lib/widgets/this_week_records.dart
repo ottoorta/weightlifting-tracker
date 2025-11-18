@@ -24,6 +24,8 @@ class ThisWeekRecords extends StatelessWidget {
         "${startOfLastWeek.year}-${startOfLastWeek.month.toString().padLeft(2, '0')}-${startOfLastWeek.day.toString().padLeft(2, '0')}";
 
     try {
+      debugPrint("THIS WEEK RECORDS - DEBUG MODE ON");
+      debugPrint("Hoy: ${now.toString().split(' ').first}");
       debugPrint("Esta semana: $thisWeekStartStr → ...");
       debugPrint("Semana pasada: $lastWeekStartStr → $thisWeekStartStr");
 
@@ -34,6 +36,14 @@ class ThisWeekRecords extends StatelessWidget {
           .where('date', isGreaterThanOrEqualTo: thisWeekStartStr)
           .get();
 
+      debugPrint(
+          "Esta semana: ${thisWeekSnapshot.docs.length} workouts encontrados:");
+      for (var doc in thisWeekSnapshot.docs) {
+        final data = doc.data();
+        debugPrint(
+            "  → Workout ID: ${doc.id} | Fecha: ${data['date']} | Duración: ${data['duration']} min | logged_sets: ${doc.reference.collection('logged_sets').path}");
+      }
+
       // SEMANA PASADA
       final lastWeekSnapshot = await FirebaseFirestore.instance
           .collection('workouts')
@@ -42,8 +52,13 @@ class ThisWeekRecords extends StatelessWidget {
           .where('date', isLessThan: thisWeekStartStr)
           .get();
 
-      debugPrint("Esta semana: ${thisWeekSnapshot.docs.length} workouts");
-      debugPrint("Semana pasada: ${lastWeekSnapshot.docs.length} workouts");
+      debugPrint(
+          "Semana pasada: ${lastWeekSnapshot.docs.length} workouts encontrados:");
+      for (var doc in lastWeekSnapshot.docs) {
+        final data = doc.data();
+        debugPrint(
+            "  → Workout ID: ${doc.id} | Fecha: ${data['date']} | Duración: ${data['duration']} min");
+      }
 
       double volumeThis = 0, volumeLast = 0;
       int repsThis = 0, repsLast = 0;
@@ -55,6 +70,9 @@ class ThisWeekRecords extends StatelessWidget {
           final loggedSetsSnap =
               await doc.reference.collection('logged_sets').get();
           final duration = (doc['duration'] as num?)?.toInt() ?? 0;
+
+          debugPrint(
+              "  Procesando ${loggedSetsSnap.docs.length} sets del workout ${doc.id}");
 
           for (var setDoc in loggedSetsSnap.docs) {
             final data = setDoc.data();
@@ -82,6 +100,14 @@ class ThisWeekRecords extends StatelessWidget {
       final workoutsThisWeek = thisWeekSnapshot.docs.length;
       final workoutsLeft = 3 - workoutsThisWeek;
 
+      debugPrint("RESULTADO FINAL:");
+      debugPrint(
+          "  Esta semana → Volumen: $volumeThis KG | Reps: $repsThis | Sets: $setsThis | Tiempo: $durationThis min");
+      debugPrint(
+          "  Semana pasada → Volumen: $volumeLast KG | Reps: $repsLast | Sets: $setsLast | Tiempo: $durationLast min");
+      debugPrint(
+          "  Diferencia → Volumen: ${volumeThis - volumeLast} | Reps: ${repsThis - repsLast} | Tiempo: ${durationThis - durationLast} min");
+
       return {
         'volume': volumeThis,
         'volumeDiff': volumeThis - volumeLast,
@@ -94,7 +120,7 @@ class ThisWeekRecords extends StatelessWidget {
         'workoutsLeft': workoutsLeft.clamp(0, 3),
       };
     } catch (e, s) {
-      debugPrint("ERROR en ThisWeekRecords: $e\n$s");
+      debugPrint("ERROR CRÍTICO en ThisWeekRecords: $e\n$s");
       return _emptyStats();
     }
   }
@@ -146,64 +172,50 @@ class ThisWeekRecords extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.orange.withOpacity(0.3),
-                blurRadius: 20,
-                spreadRadius: 1,
-              ),
+                  color: Colors.orange.withOpacity(0.3),
+                  blurRadius: 20,
+                  spreadRadius: 1),
             ],
           ),
           child: Column(
             children: [
-              const Text(
-                "This Week’s Records",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              const Text("This Week’s Records",
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  _StatBox(
+              Row(children: [
+                _StatBox(
                     title: "Volume Lifted",
                     value: "${stats['volume'].toStringAsFixed(0)} KG",
                     change: _formatChange(stats['volumeDiff']),
-                    isUp: stats['volumeDiff'] >= 0,
-                  ),
-                  const SizedBox(width: 12),
-                  _StatBox(
+                    isUp: stats['volumeDiff'] >= 0),
+                const SizedBox(width: 12),
+                _StatBox(
                     title: "Reps Completed",
                     value: stats['reps'].toString(),
                     change: _formatChange(stats['repsDiff']),
-                    isUp: stats['repsDiff'] >= 0,
-                  ),
-                ],
-              ),
+                    isUp: stats['repsDiff'] >= 0),
+              ]),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  _StatBox(
+              Row(children: [
+                _StatBox(
                     title: "Workout Time",
                     value: _formatDuration(stats['duration']),
                     change:
                         _formatChange(stats['durationDiff'], isDuration: true),
-                    isUp: stats['durationDiff'] >= 0,
-                  ),
-                  const SizedBox(width: 12),
-                  _StatBox(
+                    isUp: stats['durationDiff'] >= 0),
+                const SizedBox(width: 12),
+                _StatBox(
                     title: "Sets Completed",
                     value: stats['sets'].toString(),
                     change: _formatChange(stats['setsDiff']),
-                    isUp: stats['setsDiff'] >= 0,
-                  ),
-                ],
-              ),
+                    isUp: stats['setsDiff'] >= 0),
+              ]),
               const SizedBox(height: 16),
-              Text(
-                "${stats['workoutsLeft']} Workouts left this week",
-                style: const TextStyle(color: Colors.white70, fontSize: 16),
-              ),
+              Text("${stats['workoutsLeft']} Workouts left this week",
+                  style: const TextStyle(color: Colors.white70, fontSize: 16)),
             ],
           ),
         );
@@ -215,13 +227,11 @@ class ThisWeekRecords extends StatelessWidget {
 class _StatBox extends StatelessWidget {
   final String title, value, change;
   final bool isUp;
-
-  const _StatBox({
-    required this.title,
-    required this.value,
-    required this.change,
-    required this.isUp,
-  });
+  const _StatBox(
+      {required this.title,
+      required this.value,
+      required this.change,
+      required this.isUp});
 
   @override
   Widget build(BuildContext context) {
@@ -229,47 +239,28 @@ class _StatBox extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFF2C2C2E),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            const SizedBox(height: 6),
-            FittedBox(
+            color: const Color(0xFF2C2C2E),
+            borderRadius: BorderRadius.circular(16)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 6),
+          FittedBox(
               fit: BoxFit.scaleDown,
-              child: Row(
-                children: [
-                  Text(
-                    value,
+              child: Row(children: [
+                Text(value,
                     style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(
-                    isUp ? Icons.trending_up : Icons.trending_down,
-                    color: isUp ? Colors.green : Colors.red,
-                    size: 18,
-                  ),
-                  Text(
-                    change,
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(width: 6),
+                Icon(isUp ? Icons.trending_up : Icons.trending_down,
+                    color: isUp ? Colors.green : Colors.red, size: 18),
+                Text(change,
                     style: TextStyle(
-                      color: isUp ? Colors.green : Colors.red,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+                        color: isUp ? Colors.green : Colors.red, fontSize: 13)),
+              ])),
+        ]),
       ),
     );
   }
