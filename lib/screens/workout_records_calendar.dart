@@ -17,17 +17,16 @@ class _WorkoutRecordsCalendarScreenState
     extends State<WorkoutRecordsCalendarScreen> {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
 
   String _selectedRange = 'Week';
-  Set<DateTime> _completedDays = {}; // Verde
-  Set<DateTime> _plannedDays = {}; // Naranja
+  Set<DateTime> _completedDays = {};
+  Set<DateTime> _plannedDays = {};
 
   Map<String, dynamic> _currentStats = {};
   Map<String, dynamic> _previousStats = {};
 
   final PageController _pageController = PageController(initialPage: 1);
-  int _currentPage = 1; // 0 = Past, 1 = Calendar, 2 = Future
+  int _currentPage = 1;
 
   List<DocumentSnapshot> _pastWorkouts = [];
   List<DocumentSnapshot> _futureWorkouts = [];
@@ -67,10 +66,12 @@ class _WorkoutRecordsCalendarScreenState
 
     switch (_selectedRange) {
       case 'Week':
+        final weekday = now.weekday;
         currentStart = now
-            .subtract(Duration(days: now.weekday - 1))
+            .subtract(Duration(days: weekday - 1))
             .copyWith(hour: 0, minute: 0, second: 0);
-        currentEnd = currentStart.add(const Duration(days: 7));
+        currentEnd = currentStart
+            .add(const Duration(days: 7)); // lunes siguiente (exclusivo)
         previousStart = currentStart.subtract(const Duration(days: 7));
         previousEnd = currentStart;
         break;
@@ -93,33 +94,41 @@ class _WorkoutRecordsCalendarScreenState
         previousEnd = currentEnd;
     }
 
+    // Limpiar estado anterior
+    setState(() {
+      _currentStats = {};
+      _previousStats = {};
+    });
+
     final current = await _fetchStats(currentStart, currentEnd);
     final previous = _selectedRange == 'All Time'
-        ? {}
+        ? {'stats': {}}
         : await _fetchStats(previousStart, previousEnd);
+
+    if (!mounted) return;
 
     setState(() {
       _currentStats = current['stats'];
+      _previousStats = previous['stats'] ?? {};
       _completedDays = current['completedDays'] ?? {};
       _plannedDays = current['plannedDays'] ?? {};
       _pastWorkouts = current['past'] ?? [];
       _futureWorkouts = current['future'] ?? [];
-      _previousStats = previous['stats'] ?? {};
       _currentPastIndex = 0;
     });
   }
 
   Future<Map<String, dynamic>> _fetchStats(DateTime start, DateTime end) async {
     final user = FirebaseAuth.instance.currentUser!;
-    final endExclusive = end
-        .copyWith(hour: 0, minute: 0, second: 0)
-        .add(const Duration(days: 1));
+
+    debugPrint(
+        "Fetching stats from ${start.toString().split(' ')[0]} to ${end.toString().split(' ')[0]}");
 
     final completedSnapshot = await FirebaseFirestore.instance
         .collection('workouts')
         .where('uid', isEqualTo: user.uid)
         .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-        .where('completedAt', isLessThan: Timestamp.fromDate(endExclusive))
+        .where('completedAt', isLessThan: Timestamp.fromDate(end))
         .get();
 
     final now = DateTime.now();
@@ -137,7 +146,6 @@ class _WorkoutRecordsCalendarScreenState
 
     double volume = 0;
     int reps = 0, sets = 0, duration = 0, workouts = 0;
-
     double maxWeight = 0;
     double maxVolumeInSession = 0;
     int maxRepsInSession = 0;
@@ -145,7 +153,8 @@ class _WorkoutRecordsCalendarScreenState
     final past = <DocumentSnapshot>[];
     final future = <DocumentSnapshot>[];
 
-    // Past Workouts (completados) → verde
+    debugPrint("Found ${completedSnapshot.docs.length} completed workouts");
+
     for (var doc in completedSnapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
@@ -158,33 +167,41 @@ class _WorkoutRecordsCalendarScreenState
 
       final loggedSetsSnap =
           await doc.reference.collection('logged_sets').get();
-      if (loggedSetsSnap.docs.isEmpty) continue;
+      debugPrint(
+          "  Workout ${doc.id} (${dateOnly.toString().split(' ')[0]}) → ${loggedSetsSnap.docs.length} sets");
 
       final workoutDuration = (data['duration'] as num?)?.toInt() ?? 0;
       duration += workoutDuration;
       workouts++;
 
       double sessionVolume = 0;
+      int workoutReps = 0;
+
       for (var set in loggedSetsSnap.docs) {
         final s = set.data() as Map<String, dynamic>;
         final w = (s['weight'] as num?)?.toDouble() ?? 0;
         final r = (s['reps'] as num?)?.toInt() ?? 0;
 
-        volume += w * r;
-        reps += r;
-        sets++;
+        if (w > 0 && r > 0) {
+          volume += w * r;
+          reps += r;
+          sets++;
+          sessionVolume += w * r;
+          workoutReps += r;
 
-        if (w > maxWeight) maxWeight = w;
-        if (r > maxRepsInSession) maxRepsInSession = r;
-        sessionVolume += w * r;
+          if (w > maxWeight) maxWeight = w;
+          if (r > maxRepsInSession) maxRepsInSession = r;
+        }
       }
+
+      debugPrint(
+          "    → Reps: $workoutReps | Volume: ${sessionVolume.toStringAsFixed(0)} kg");
 
       if (sessionVolume > maxVolumeInSession) {
         maxVolumeInSession = sessionVolume;
       }
     }
 
-    // Future Workouts → naranja (solo los que no tienen completedAt)
     for (var doc in futureSnapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       if (data['completedAt'] != null) continue;
@@ -207,6 +224,9 @@ class _WorkoutRecordsCalendarScreenState
           (b['completedAt'] as Timestamp?)?.toDate() ?? DateTime(1970);
       return bTime.compareTo(aTime);
     });
+
+    debugPrint(
+        "TOTAL → Workouts: $workouts | Sets: $sets | Reps: $reps | Volume: ${volume.toStringAsFixed(0)} kg");
 
     return {
       'completedDays': completedDays,
@@ -249,22 +269,35 @@ class _WorkoutRecordsCalendarScreenState
 
   String _getComparisonText(dynamic current, dynamic previous,
       {bool isDuration = false}) {
-    final diff = (current ?? 0) - (previous ?? 0);
+    final currentValue = (current is num) ? current.toDouble() : 0.0;
+    final previousValue = (previous is num) ? previous.toDouble() : 0.0;
+    final diff = currentValue - previousValue;
+
     if (diff == 0) return "same as last period";
-    final abs = diff.abs();
-    final prefix = diff > 0 ? "+" : "-";
+
+    final isUp = diff > 0;
+    final absDiff = diff.abs();
+
+    String changeText;
     if (isDuration) {
-      final h = abs ~/ 60;
-      final m = abs % 60;
-      final time = h > 0 ? "${h}h ${m}min" : "${m}min";
-      return "$prefix$time ${diff > 0 ? "more" : "less"} than last period";
+      final hours = absDiff ~/ 60;
+      final minutes = (absDiff % 60).toInt();
+      changeText = hours > 0 ? "${hours}h ${minutes}min" : "${minutes}min";
+    } else {
+      changeText = absDiff % 1 == 0
+          ? absDiff.toInt().toString()
+          : absDiff.toStringAsFixed(1);
     }
-    return "$prefix$abs ${diff > 0 ? "more" : "less"} than last period";
+
+    final direction = isUp ? "more" : "less";
+    final prefix = isUp ? "+" : "-";
+
+    return "$prefix$changeText $direction than last period";
   }
 
   double _estimate1RM(double weight, int reps) {
     if (reps >= 37 || weight <= 0) return weight;
-    return weight * 36 / (37 - reps); // Fórmula de Brzycki
+    return weight * 36 / (37 - reps);
   }
 
   @override
@@ -288,7 +321,6 @@ class _WorkoutRecordsCalendarScreenState
       ),
       body: Column(
         children: [
-          // Botones
           Container(
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -320,8 +352,6 @@ class _WorkoutRecordsCalendarScreenState
               }).toList(),
             ),
           ),
-
-          // SCROLL HORIZONTAL
           Expanded(
             flex: 3,
             child: PageView(
@@ -334,14 +364,11 @@ class _WorkoutRecordsCalendarScreenState
               ],
             ),
           ),
-
-          // NAVEGACIÓN
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // IZQUIERDA
                 if (_currentPage == 1)
                   GestureDetector(
                     onTap: () {
@@ -389,8 +416,6 @@ class _WorkoutRecordsCalendarScreenState
                               fontSize: 16)),
                     ]),
                   ),
-
-                // DERECHA
                 if (_currentPage == 1)
                   GestureDetector(
                     onTap: () => _pageController.animateToPage(2,
@@ -424,8 +449,6 @@ class _WorkoutRecordsCalendarScreenState
               ],
             ),
           ),
-
-          // STATS
           Expanded(
             flex: 2,
             child: ListView(
@@ -513,37 +536,26 @@ class _WorkoutRecordsCalendarScreenState
         ),
         eventLoader: (day) {
           final d = DateTime(day.year, day.month, day.day);
-          if (_completedDays.contains(d) || _plannedDays.contains(d)) {
+          if (_completedDays.contains(d) || _plannedDays.contains(d))
             return ['event'];
-          }
           return [];
         },
         calendarBuilders: CalendarBuilders(
           markerBuilder: (context, date, events) {
             final d = DateTime(date.year, date.month, date.day);
             if (_completedDays.contains(d)) {
-              return Positioned(
-                bottom: 6,
-                right: 6,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
-                      color: Colors.green, shape: BoxShape.circle),
-                ),
-              );
+              return const Positioned(
+                  bottom: 6,
+                  right: 6,
+                  child:
+                      CircleAvatar(radius: 4.5, backgroundColor: Colors.green));
             }
             if (_plannedDays.contains(d)) {
-              return Positioned(
-                bottom: 6,
-                right: 6,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
-                      color: Colors.orange, shape: BoxShape.circle),
-                ),
-              );
+              return const Positioned(
+                  bottom: 6,
+                  right: 6,
+                  child: CircleAvatar(
+                      radius: 4.5, backgroundColor: Colors.orange));
             }
             return null;
           },
