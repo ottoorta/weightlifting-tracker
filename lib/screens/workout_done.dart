@@ -1,5 +1,6 @@
 // lib/screens/workout_done.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -23,6 +24,10 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
   int durationMinutes = 0;
 
   final DateFormat dateFormat = DateFormat('EEEE, MMMM do yyyy');
+  final User? currentUser = FirebaseAuth.instance.currentUser;
+
+  // Mapa para almacenar si cada ejercicio es favorito
+  final Map<String, bool> _isFavoriteMap = {};
 
   @override
   void initState() {
@@ -37,7 +42,7 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
           .doc(widget.workoutId)
           .get();
 
-      if (!workoutDoc.exists) {
+      if (!workoutDoc.exists || currentUser == null) {
         if (mounted) setState(() => isLoading = false);
         return;
       }
@@ -84,7 +89,19 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
             ? Map<String, dynamic>.from(exerciseData['muscleDistribution'])
             : <String, dynamic>{};
 
-// CARGAR LOGGED SETS CON ORDEN CORRECTO Y SEGURO
+        // Cargar si es favorito
+        final noteDoc = await FirebaseFirestore.instance
+            .collection('exercises_notes')
+            .doc('${currentUser!.uid}_$id')
+            .get();
+
+        final bool isFavorite =
+            noteDoc.exists && (noteDoc.data()?['favorite'] == true);
+
+        // Guardar en el mapa
+        _isFavoriteMap[id] = isFavorite;
+
+        // CARGAR LOGGED SETS
         final loggedSetsSnap = await FirebaseFirestore.instance
             .collection('workouts')
             .doc(widget.workoutId)
@@ -152,7 +169,6 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
           index++;
         }
 
-        // Marcar récords solo en el set correcto
         if (best1RMIndex >= 0 && best1RMIndex < sets.length) {
           sets[best1RMIndex]['isBest1RM'] = true;
         }
@@ -169,15 +185,15 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
           'best1RM': best1RM,
           'muscles': muscles,
           'muscleDistribution': muscleDist,
+          'isFavorite': isFavorite,
         });
       }
 
-      // === TARGET MUSCLES ===
+      // TARGET MUSCLES
       final muscleMap = <String, double>{};
       for (var ex in loadedExercises) {
         final muscles = ex['muscles'] as List<String>;
         final dist = ex['muscleDistribution'] as Map<String, dynamic>;
-
         for (var m in muscles) {
           final percent = dist[m]?.toDouble() ?? (100.0 / muscles.length);
           muscleMap[m] = (muscleMap[m] ?? 0) + percent;
@@ -192,11 +208,7 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
       for (final e in sorted.take(6)) {
         final percent = total > 0 ? ((e.value / total) * 100).round() : 0;
         final imageUrl = await _getMuscleImage(e.key);
-        targets.add({
-          'name': e.key,
-          'percent': percent,
-          'imageUrl': imageUrl,
-        });
+        targets.add({'name': e.key, 'percent': percent, 'imageUrl': imageUrl});
       }
 
       if (mounted) {
@@ -210,7 +222,7 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Error: $e");
+      debugPrint("Error loading workout: $e");
       if (mounted) setState(() => isLoading = false);
     }
   }
@@ -222,9 +234,7 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
           .where('name', isEqualTo: muscleName)
           .limit(1)
           .get();
-      if (snap.docs.isNotEmpty) {
-        return snap.docs.first['imageUrl'] as String?;
-      }
+      if (snap.docs.isNotEmpty) return snap.docs.first['imageUrl'] as String?;
     } catch (_) {}
     return null;
   }
@@ -277,15 +287,13 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                         itemBuilder: (ctx, i) {
                           final m = muscleTargets[i];
                           final imageUrl = m['imageUrl']?.toString();
-
                           return Container(
                             width: 90,
                             margin: const EdgeInsets.only(right: 12),
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1C1C1E),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
+                                color: const Color(0xFF1C1C1E),
+                                borderRadius: BorderRadius.circular(16)),
                             child: Column(
                               children: [
                                 Expanded(
@@ -305,10 +313,10 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                                 ),
                                 const SizedBox(height: 6),
                                 FittedBox(
-                                  child: Text(m['name'],
-                                      style: const TextStyle(
-                                          color: Colors.white, fontSize: 11)),
-                                ),
+                                    child: Text(m['name'],
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11))),
                                 Text("${m['percent']}%",
                                     style: const TextStyle(
                                         color: Colors.orange,
@@ -329,7 +337,6 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
 
-                  // STATS
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
@@ -345,6 +352,7 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                   ...exercises.map((ex) {
                     final imageUrl = ex['imageUrl']?.toString();
                     final sets = ex['sets'] as List<Map<String, dynamic>>;
+                    final bool isFavorite = ex['isFavorite'] as bool? ?? false;
 
                     return GestureDetector(
                       onTap: () => Navigator.pushNamed(
@@ -359,9 +367,8 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                         margin: const EdgeInsets.only(bottom: 20),
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1C1C1E),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
+                            color: const Color(0xFF1C1C1E),
+                            borderRadius: BorderRadius.circular(20)),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -370,8 +377,8 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                               child: imageUrl != null &&
                                       imageUrl.startsWith('http')
                                   ? Image.network(imageUrl,
-                                      width: 80,
-                                      height: 80,
+                                      width: 90,
+                                      height: 120,
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => Container(
                                           color: Colors.grey[800],
@@ -379,8 +386,8 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                                               Icons.fitness_center,
                                               color: Colors.white54)))
                                   : Container(
-                                      width: 80,
-                                      height: 80,
+                                      width: 90,
+                                      height: 120,
                                       color: Colors.grey[800],
                                       child: const Icon(Icons.fitness_center,
                                           color: Colors.white54)),
@@ -390,11 +397,22 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(ex['name'],
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold)),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          ex['name'],
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                      if (isFavorite)
+                                        const Icon(Icons.favorite,
+                                            color: Colors.red, size: 20),
+                                    ],
+                                  ),
                                   const SizedBox(height: 8),
 
                                   // Sets
@@ -411,12 +429,11 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                                                   color: Colors.white70)),
                                           if (s['isBest1RM'] == true) ...[
                                             const Padding(
-                                              padding:
-                                                  EdgeInsets.only(left: 10),
-                                              child: Icon(Icons.emoji_events,
-                                                  color: Colors.amber,
-                                                  size: 18),
-                                            ),
+                                                padding:
+                                                    EdgeInsets.only(left: 10),
+                                                child: Icon(Icons.emoji_events,
+                                                    color: Colors.amber,
+                                                    size: 18)),
                                             const Text("1RM",
                                                 style: TextStyle(
                                                     color: Colors.amber,
@@ -425,13 +442,13 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
                                           ],
                                           if (s['isMaxWeight'] == true)
                                             const Padding(
-                                              padding: EdgeInsets.only(left: 8),
-                                              child: Text("Max Weight",
-                                                  style: TextStyle(
-                                                      color: Colors.orange,
-                                                      fontWeight:
-                                                          FontWeight.bold)),
-                                            ),
+                                                padding:
+                                                    EdgeInsets.only(left: 8),
+                                                child: Text("Max",
+                                                    style: TextStyle(
+                                                        color: Colors.orange,
+                                                        fontWeight:
+                                                            FontWeight.bold))),
                                         ],
                                       ),
                                     );
