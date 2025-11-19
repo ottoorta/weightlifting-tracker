@@ -20,7 +20,9 @@ class _WorkoutRecordsCalendarScreenState
   DateTime? _selectedDay;
 
   String _selectedRange = 'Week';
-  Set<DateTime> _workoutDays = {};
+  Set<DateTime> _completedDays = {}; // Verde
+  Set<DateTime> _plannedDays = {}; // Naranja
+
   Map<String, dynamic> _currentStats = {};
   Map<String, dynamic> _previousStats = {};
 
@@ -98,7 +100,8 @@ class _WorkoutRecordsCalendarScreenState
 
     setState(() {
       _currentStats = current['stats'];
-      _workoutDays = current['days'];
+      _completedDays = current['completedDays'] ?? {};
+      _plannedDays = current['plannedDays'] ?? {};
       _pastWorkouts = current['past'] ?? [];
       _futureWorkouts = current['future'] ?? [];
       _previousStats = previous['stats'] ?? {};
@@ -129,7 +132,9 @@ class _WorkoutRecordsCalendarScreenState
                 "${todayStart.year}-${todayStart.month.toString().padLeft(2, '0')}-${todayStart.day.toString().padLeft(2, '0')}")
         .get();
 
-    final days = <DateTime>{};
+    final Set<DateTime> completedDays = {};
+    final Set<DateTime> plannedDays = {};
+
     double volume = 0;
     int reps = 0, sets = 0, duration = 0, workouts = 0;
 
@@ -140,7 +145,7 @@ class _WorkoutRecordsCalendarScreenState
     final past = <DocumentSnapshot>[];
     final future = <DocumentSnapshot>[];
 
-    // Past Workouts (completados)
+    // Past Workouts (completados) → verde
     for (var doc in completedSnapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
@@ -148,7 +153,7 @@ class _WorkoutRecordsCalendarScreenState
 
       final dateOnly =
           DateTime(completedAt.year, completedAt.month, completedAt.day);
-      days.add(dateOnly);
+      completedDays.add(dateOnly);
       past.add(doc);
 
       final loggedSetsSnap =
@@ -179,14 +184,20 @@ class _WorkoutRecordsCalendarScreenState
       }
     }
 
-    // Future Workouts
+    // Future Workouts → naranja (solo los que no tienen completedAt)
     for (var doc in futureSnapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final completedAt = data['completedAt'];
-      final startTime = data['startTime'];
-      if (completedAt == null && startTime == null) {
+      if (data['completedAt'] != null) continue;
+
+      final dateStr = data['date'] as String?;
+      if (dateStr == null) continue;
+
+      try {
+        final date = DateTime.parse(dateStr);
+        final dateOnly = DateTime(date.year, date.month, date.day);
+        plannedDays.add(dateOnly);
         future.add(doc);
-      }
+      } catch (_) {}
     }
 
     past.sort((a, b) {
@@ -198,7 +209,8 @@ class _WorkoutRecordsCalendarScreenState
     });
 
     return {
-      'days': days,
+      'completedDays': completedDays,
+      'plannedDays': plannedDays,
       'stats': {
         'workouts': workouts,
         'volume': volume,
@@ -245,9 +257,9 @@ class _WorkoutRecordsCalendarScreenState
       final h = abs ~/ 60;
       final m = abs % 60;
       final time = h > 0 ? "${h}h ${m}min" : "${m}min";
-      return "$prefix$time ${diff > 0 ? "más" : "menos"} than last period";
+      return "$prefix$time ${diff > 0 ? "more" : "less"} than last period";
     }
-    return "$prefix$abs ${diff > 0 ? "más" : "menos"} than last period";
+    return "$prefix$abs ${diff > 0 ? "more" : "less"} than last period";
   }
 
   double _estimate1RM(double weight, int reps) {
@@ -498,13 +510,44 @@ class _WorkoutRecordsCalendarScreenState
           weekendTextStyle: const TextStyle(color: Colors.orange),
           defaultTextStyle: const TextStyle(color: Colors.white70),
           disabledTextStyle: const TextStyle(color: Colors.white30),
-          markerDecoration:
-              const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
         ),
-        eventLoader: (day) =>
-            _workoutDays.contains(DateTime(day.year, day.month, day.day))
-                ? [1]
-                : [],
+        eventLoader: (day) {
+          final d = DateTime(day.year, day.month, day.day);
+          if (_completedDays.contains(d) || _plannedDays.contains(d)) {
+            return ['event'];
+          }
+          return [];
+        },
+        calendarBuilders: CalendarBuilders(
+          markerBuilder: (context, date, events) {
+            final d = DateTime(date.year, date.month, date.day);
+            if (_completedDays.contains(d)) {
+              return Positioned(
+                bottom: 6,
+                right: 6,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: const BoxDecoration(
+                      color: Colors.green, shape: BoxShape.circle),
+                ),
+              );
+            }
+            if (_plannedDays.contains(d)) {
+              return Positioned(
+                bottom: 6,
+                right: 6,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: const BoxDecoration(
+                      color: Colors.orange, shape: BoxShape.circle),
+                ),
+              );
+            }
+            return null;
+          },
+        ),
       ),
     );
   }
