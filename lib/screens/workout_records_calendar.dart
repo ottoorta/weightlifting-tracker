@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'workout_done.dart';
 
 class WorkoutRecordsCalendarScreen extends StatefulWidget {
   const WorkoutRecordsCalendarScreen({super.key});
@@ -185,7 +186,6 @@ class _WorkoutRecordsCalendarScreenState
       final startTime = data['startTime'];
       if (completedAt == null && startTime == null) {
         future.add(doc);
-        debugPrint("FUTURE WORKOUT: ${doc.id} → ${data['date']}");
       }
     }
 
@@ -245,9 +245,14 @@ class _WorkoutRecordsCalendarScreenState
       final h = abs ~/ 60;
       final m = abs % 60;
       final time = h > 0 ? "${h}h ${m}min" : "${m}min";
-      return "$prefix$time ${diff > 0 ? "more" : "less"} than last period";
+      return "$prefix$time ${diff > 0 ? "más" : "menos"} than last period";
     }
-    return "$prefix$abs ${diff > 0 ? "more" : "less"} than last period";
+    return "$prefix$abs ${diff > 0 ? "más" : "menos"} than last period";
+  }
+
+  double _estimate1RM(double weight, int reps) {
+    if (reps >= 37 || weight <= 0) return weight;
+    return weight * 36 / (37 - reps); // Fórmula de Brzycki
   }
 
   @override
@@ -516,6 +521,7 @@ class _WorkoutRecordsCalendarScreenState
 
     final data = workout.data() as Map<String, dynamic>;
     final dateStr = data['date']?.toString() ?? "Unknown Date";
+    final workoutId = workout.id; // ← UID del workout
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -540,45 +546,103 @@ class _WorkoutRecordsCalendarScreenState
           final muscles = details['muscles'] as String;
           final duration = details['duration'] as int?;
 
-          return SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Date: $dateStr",
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16)),
-                Text("At: $_gymName",
-                    style: const TextStyle(color: Colors.white70)),
-                Text("Effort: $effort",
-                    style: TextStyle(
-                      color: effort == "High"
-                          ? Colors.red
-                          : effort == "Medium"
-                              ? Colors.orange
-                              : Colors.green,
-                      fontWeight: FontWeight.bold,
-                    )),
-                Text("Volume: ${volume.toStringAsFixed(0)} Kg",
-                    style: const TextStyle(color: Colors.white)),
-                Text("Exercises: ${exercises.length}",
-                    style: const TextStyle(color: Colors.white)),
-                Text("Total time: ${_formatDuration(duration)}",
-                    style: const TextStyle(color: Colors.white)),
-                Text("Muscles: $muscles",
-                    style: const TextStyle(color: Colors.white70)),
-                const SizedBox(height: 12),
-                ...exercises.map((e) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text("• ${e['name']}",
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 15)),
-                    )),
-              ],
+          return GestureDetector(
+            onTap: isPast
+                ? () {
+                    Navigator.pushNamed(
+                      context,
+                      '/workout_done',
+                      arguments: workoutId, // ← pasa el ID como argumento
+                    );
+                  }
+                : null, // Future workouts no hacen nada al tocar
+            child: Container(
+              color: Colors.transparent,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildRichText("Date: ", dateStr, valueBold: true),
+                    _buildRichText("At: ", _gymName),
+                    _buildRichText("Effort: ", effort,
+                        valueColor: effort == "High"
+                            ? Colors.red
+                            : effort == "Medium"
+                                ? Colors.orange
+                                : Colors.green),
+                    _buildRichText(
+                        "Volume: ", "${volume.toStringAsFixed(0)} Kg"),
+                    _buildRichText("Exercises: ", "${exercises.length}"),
+                    _buildRichText("Total time: ", _formatDuration(duration)),
+                    _buildRichText("Muscles: ", muscles),
+                    const SizedBox(height: 16),
+
+                    // ← Lista de ejercicios con scroll propio
+                    SizedBox(
+                      height: exercises.length * 72.0,
+                      child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: exercises.length,
+                        itemBuilder: (context, index) {
+                          final e = exercises[index];
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text("• ${e['name']}",
+                                    style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600)),
+                                if (e['sets'] != null)
+                                  Padding(
+                                    padding:
+                                        const EdgeInsets.only(left: 16, top: 4),
+                                    child: Text(
+                                      "Sets: ${e['sets']}  •  Vol: ${e['volume'].toStringAsFixed(0)} Kg  •  1RM: ${e['1rm'].toStringAsFixed(1)} Kg  •  Max: ${e['maxWeight'].toStringAsFixed(1)} Kg",
+                                      style: const TextStyle(
+                                          color: Colors.white60, fontSize: 13),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  // ← Helper para RichText uniforme
+  Widget _buildRichText(String label, String value,
+      {Color? valueColor, bool valueBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          children: [
+            TextSpan(
+              text: label,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            TextSpan(
+              text: value,
+              style: TextStyle(
+                color: valueColor ?? Colors.white,
+                fontWeight: valueBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -590,33 +654,49 @@ class _WorkoutRecordsCalendarScreenState
     final loggedSetsSnap =
         await workout.reference.collection('logged_sets').get();
 
-    double volume = 0;
+    double totalVolume = 0;
     final List<Map<String, dynamic>> exercises = [];
     final Set<String> muscles = {};
 
-    // Mapa para contar sets por ejercicio
-    final Map<String, int> setCount = {};
+    // Acumular datos por ejercicio
+    final Map<String, Map<String, dynamic>> exerciseData = {};
 
-    // Calcular volumen y contar sets
     for (var setDoc in loggedSetsSnap.docs) {
       final s = setDoc.data() as Map<String, dynamic>;
       final exerciseId = s['exerciseId'] as String?;
       final w = (s['weight'] as num?)?.toDouble() ?? 0;
       final r = (s['reps'] as num?)?.toInt() ?? 0;
-      volume += w * r;
 
-      if (exerciseId != null) {
-        setCount[exerciseId] = (setCount[exerciseId] ?? 0) + 1;
+      if (exerciseId == null || w <= 0 || r <= 0) continue;
+
+      totalVolume += w * r;
+
+      if (!exerciseData.containsKey(exerciseId)) {
+        exerciseData[exerciseId] = {
+          'sets': 0,
+          'volume': 0.0,
+          'maxWeight': 0.0,
+          'best1RM': 0.0,
+        };
       }
+
+      final stats = exerciseData[exerciseId]!;
+      stats['sets'] = (stats['sets'] as int) + 1;
+      stats['volume'] = (stats['volume'] as double) + (w * r);
+      if (w > stats['maxWeight']) stats['maxWeight'] = w;
+
+      final estimated1RM = _estimate1RM(w, r);
+      if (estimated1RM > stats['best1RM']) stats['best1RM'] = estimated1RM;
     }
 
-    // Procesar cada exerciseId del workout
+    // Procesar ejercicios en orden original
     for (var id in exerciseIds) {
       final exerciseId = id.toString();
-      if (setCount.containsKey(exerciseId) && setCount[exerciseId]! > 0) {
+      if (exerciseData.containsKey(exerciseId)) {
         final name = await _getExerciseName(exerciseId);
+        final stats = exerciseData[exerciseId]!;
 
-        // Buscar músculo principal
+        // Músculo principal
         var doc = await FirebaseFirestore.instance
             .collection('exercises')
             .doc(exerciseId)
@@ -637,11 +717,17 @@ class _WorkoutRecordsCalendarScreenState
           }
         }
 
-        exercises.add({'name': name});
+        exercises.add({
+          'name': name,
+          'sets': stats['sets'],
+          'volume': stats['volume'],
+          '1rm': stats['best1RM'],
+          'maxWeight': stats['maxWeight'],
+        });
       }
     }
 
-    // Calcular Effort basado en RIR
+    // Effort basado en RIR promedio
     String effort = "Medium";
     double totalRir = 0;
     int rirCount = 0;
@@ -663,7 +749,7 @@ class _WorkoutRecordsCalendarScreenState
 
     return {
       'exercises': exercises,
-      'volume': volume,
+      'volume': totalVolume,
       'effort': effort,
       'muscles': muscles.isEmpty ? "Various" : muscles.join(", "),
       'duration': (data['duration'] as num?)?.toInt(),

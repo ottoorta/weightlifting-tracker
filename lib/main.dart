@@ -30,6 +30,7 @@ import 'screens/add_custom_exercise.dart';
 import 'screens/add_custom_equipment.dart';
 import 'screens/profile_settings.dart';
 import 'screens/workout_records_calendar.dart';
+import 'screens/workout_done.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -140,6 +141,11 @@ class IronCoachApp extends StatelessWidget {
                 ),
               ),
             ),
+        '/workout_done': (context) {
+          final workoutId =
+              ModalRoute.of(context)!.settings.arguments as String;
+          return WorkoutDoneScreen(workoutId: workoutId);
+        },
       },
     );
   }
