@@ -31,6 +31,7 @@ import 'screens/add_custom_equipment.dart';
 import 'screens/profile_settings.dart';
 import 'screens/workout_records_calendar.dart';
 import 'screens/workout_done.dart';
+import 'screens/body_measurements.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -147,15 +148,7 @@ class IronCoachApp extends StatelessWidget {
         },
 
         // RUTAS NUEVAS (CORREGIDAS)
-        '/body_measurements': (context) => Scaffold(
-              backgroundColor: Colors.black,
-              appBar: AppBar(
-                  title: const Text("Body Measurements",
-                      style: TextStyle(color: Colors.white))),
-              body: const Center(
-                  child: Text("Body Measurements Screen",
-                      style: TextStyle(color: Colors.white, fontSize: 20))),
-            ),
+        '/body_measurements': (context) => const BodyMeasurementsScreen(),
         '/strength_score': (context) => Scaffold(
               backgroundColor: Colors.black,
               appBar: AppBar(
