@@ -6,6 +6,7 @@ import '../widgets/workout_card.dart';
 import 'search_exercises.dart';
 import 'search_equipments.dart';
 import '../widgets/this_week_records.dart';
+import '../widgets/workout_calendar.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -251,6 +252,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   height:
                       10), //espacio entre widget your next workout y this weeks records
               const ThisWeekRecords(),
+              const SizedBox(height: 12),
+              const WorkoutCalendar(),
 // Mantén un poco de espacio para el bottom nav
               const SizedBox(height: 80),
             ],
