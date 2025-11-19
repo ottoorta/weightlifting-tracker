@@ -11,17 +11,17 @@ class ThisWeekRecords extends StatelessWidget {
     if (user == null) return _emptyStats();
 
     final now = DateTime.now();
+    final weekday = now.weekday;
+
     final startOfThisWeek = now
-        .subtract(Duration(days: now.weekday - 1))
+        .subtract(Duration(days: weekday - 1))
         .copyWith(hour: 0, minute: 0, second: 0, millisecond: 0);
     final endOfThisWeek = startOfThisWeek.add(const Duration(days: 7));
 
     final startOfLastWeek = startOfThisWeek.subtract(const Duration(days: 7));
+    final endOfLastWeek = startOfThisWeek;
 
     try {
-      debugPrint(
-          "ThisWeekRecords: Esta semana ${startOfThisWeek.toString().split(' ').first} → ${endOfThisWeek.toString().split(' ').first}");
-
       final thisWeekSnapshot = await FirebaseFirestore.instance
           .collection('workouts')
           .where('uid', isEqualTo: user.uid)
@@ -35,7 +35,7 @@ class ThisWeekRecords extends StatelessWidget {
           .where('uid', isEqualTo: user.uid)
           .where('completedAt',
               isGreaterThanOrEqualTo: Timestamp.fromDate(startOfLastWeek))
-          .where('completedAt', isLessThan: Timestamp.fromDate(startOfThisWeek))
+          .where('completedAt', isLessThan: Timestamp.fromDate(endOfLastWeek))
           .get();
 
       double volumeThis = 0, volumeLast = 0;
@@ -46,19 +46,12 @@ class ThisWeekRecords extends StatelessWidget {
 
       Future<void> _process(QuerySnapshot snapshot, bool isThisWeek) async {
         for (var doc in snapshot.docs) {
-          final data = doc.data() as Map<String, dynamic>; // ← CORREGIDO AQUÍ
+          final data = doc.data() as Map<String, dynamic>;
           final loggedSetsSnap =
               await doc.reference.collection('logged_sets').get();
-          if (loggedSetsSnap.docs.isEmpty) {
-            debugPrint("IGNORADO workout ${doc.id}: sin logged_sets");
-            continue;
-          }
+          if (loggedSetsSnap.docs.isEmpty) continue;
 
           final duration = (data['duration'] as num?)?.toInt() ?? 0;
-          final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
-
-          debugPrint(
-              "PROCESADO workout ${doc.id} → ${completedAt?.toString().split(' ').first} | ${loggedSetsSnap.docs.length} sets");
 
           if (isThisWeek) {
             workoutsThisWeek++;
@@ -72,14 +65,17 @@ class ThisWeekRecords extends StatelessWidget {
             final w = (s['weight'] as num?)?.toDouble() ?? 0;
             final r = (s['reps'] as num?)?.toInt() ?? 0;
 
-            if (isThisWeek) {
-              volumeThis += w * r;
-              repsThis += r;
-              setsThis++;
-            } else {
-              volumeLast += w * r;
-              repsLast += r;
-              setsLast++;
+            // SOLO CUENTA SETS CON REPS > 0
+            if (w > 0 && r > 0) {
+              if (isThisWeek) {
+                volumeThis += w * r;
+                repsThis += r;
+                setsThis++;
+              } else {
+                volumeLast += w * r;
+                repsLast += r;
+                setsLast++;
+              }
             }
           }
         }
@@ -87,9 +83,6 @@ class ThisWeekRecords extends StatelessWidget {
 
       await _process(thisWeekSnapshot, true);
       await _process(lastWeekSnapshot, false);
-
-      debugPrint(
-          "RESULTADO: $workoutsThisWeek workouts esta semana | Volumen: ${volumeThis.toStringAsFixed(0)} Kg");
 
       return {
         'volume': volumeThis,
@@ -102,8 +95,7 @@ class ThisWeekRecords extends StatelessWidget {
         'durationDiff': durationThis - durationLast,
         'workoutsThisWeek': workoutsThisWeek,
       };
-    } catch (e, s) {
-      debugPrint("ERROR en ThisWeekRecords: $e\n$s");
+    } catch (e) {
       return _emptyStats();
     }
   }
