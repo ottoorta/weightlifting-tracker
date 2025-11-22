@@ -4,6 +4,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../widgets/workout_card.dart';
 import 'search_exercises.dart';
+import 'search_equipments.dart';
+import '../widgets/this_week_records.dart';
+import '../widgets/workout_calendar.dart';
+import '../widgets/user_progress_stats.dart';
+
+final GlobalKey<ThisWeekRecordsState> _thisWeekKey =
+    GlobalKey<ThisWeekRecordsState>();
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,6 +27,22 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadUserData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // This runs every time the Home screen becomes visible again
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      route.didPush().then((_) {
+        // Small delay so the widget tree is fully built
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _thisWeekKey.currentState?.refresh();
+        });
+      });
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -174,11 +197,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Equipment search coming soon!"),
-                      backgroundColor: Colors.orange,
-                    ),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SearchEquipmentsScreen()),
                   );
                 },
               ),
@@ -186,6 +207,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+      return;
+    }
+    if (index == 4) {
+      Navigator.pushNamed(context, '/profile_settings');
       return;
     }
 
@@ -243,7 +268,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: WorkoutCard(),
               ),
 
-              const SizedBox(height: 100), // extra space for bottom nav
+              const SizedBox(
+                  height:
+                      10), //espacio entre widget your next workout y this weeks records
+              ThisWeekRecords(key: _thisWeekKey),
+              const SizedBox(height: 12),
+              const UserProgressStats(), // ← AÑADE ESTO
+              const SizedBox(height: 12),
+              const WorkoutCalendar(),
+// Mantén un poco de espacio para el bottom nav
+              const SizedBox(height: 80),
             ],
           ),
         ),

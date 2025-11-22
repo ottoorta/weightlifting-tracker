@@ -14,7 +14,7 @@ class _WorkoutCardState extends State<WorkoutCard> {
   bool _isLoading = false;
 
   Map<String, dynamic>? _workout;
-  List<Map<String, dynamic>> _exercises = [];
+  final List<Map<String, dynamic>> _exercises = [];
 
   @override
   void initState() {
@@ -29,6 +29,66 @@ class _WorkoutCardState extends State<WorkoutCard> {
     }).then((_) {
       setState(() {});
     });
+  }
+
+  // NUEVA FUNCIÓN: Imagen segura
+  Widget _safeImage(String? url, {double width = 100, double height = 100}) {
+    final imageUrl = url?.toString().trim();
+
+    if (imageUrl == null ||
+        imageUrl.isEmpty ||
+        imageUrl.startsWith('file://') ||
+        imageUrl == 'null' ||
+        !imageUrl.startsWith('http')) {
+      return Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.grey[800],
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child:
+            const Icon(Icons.fitness_center, color: Colors.white54, size: 40),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image.network(
+        imageUrl,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            width: width,
+            height: height,
+            color: Colors.grey[800],
+            child: const Center(
+              child: SizedBox(
+                width: 30,
+                height: 30,
+                child: CircularProgressIndicator(
+                    color: Colors.orange, strokeWidth: 2),
+              ),
+            ),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              color: Colors.grey[800],
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.fitness_center,
+                color: Colors.white54, size: 40),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -63,12 +123,10 @@ class _WorkoutCardState extends State<WorkoutCard> {
         final workoutData = doc.data() as Map<String, dynamic>;
         workoutData['id'] = doc.id;
 
-        // === NEW: HIDE IF COMPLETED ===
         if (workoutData['completedAt'] != null) {
           return _buildEmptyCard();
         }
 
-        // SAFE PARSING: exerciseIds
         List<String> ids = [];
         final rawIds = workoutData['exerciseIds'];
         if (rawIds is List) {
@@ -81,9 +139,7 @@ class _WorkoutCardState extends State<WorkoutCard> {
               .toList();
         }
 
-        if (ids.isEmpty) {
-          return _buildEmptyCard();
-        }
+        if (ids.isEmpty) return _buildEmptyCard();
 
         return FutureBuilder<List<Map<String, dynamic>>>(
           future: _loadExercises(ids),
@@ -95,10 +151,8 @@ class _WorkoutCardState extends State<WorkoutCard> {
 
             final exercises = exSnap.data ?? [];
 
-            // MUSCLE DISTRIBUTION — FULLY SAFE
             final muscleMap = <String, double>{};
             for (var ex in exercises) {
-              // SAFE: muscles
               List<String> muscles = [];
               final rawMuscles = ex['muscles'];
               if (rawMuscles is List) {
@@ -111,7 +165,6 @@ class _WorkoutCardState extends State<WorkoutCard> {
                     .toList();
               }
 
-              // SAFE: muscleDistribution
               List<double> percentages = [];
               final rawPerc = ex['muscleDistribution'];
               if (rawPerc is List) {
@@ -161,7 +214,8 @@ class _WorkoutCardState extends State<WorkoutCard> {
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  //crossAxisAlignment: CrossAxisAlignment.start, alineacion izquierda
+                  //sin nada se alinea al centro
                   children: [
                     Text(
                       _isTomorrow ? "Tomorrow's Workout" : "Your Next Workout",
@@ -172,31 +226,19 @@ class _WorkoutCardState extends State<WorkoutCard> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Images
-                    GestureDetector(
-                      onTap: () =>
-                          _navigateToWorkoutMain(workoutData, exercises),
-                      child: SizedBox(
-                        height: 100,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: exercises.length,
-                          itemBuilder: (ctx, i) {
-                            final ex = exercises[i];
-                            return Container(
-                              margin: const EdgeInsets.only(right: 12),
-                              width: 100,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                                image: DecorationImage(
-                                  image: NetworkImage(ex['imageUrl'] ??
-                                      'https://i.imgur.com/5K8zK5P.png'),
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                    // IMÁGENES CON _safeImage
+                    SizedBox(
+                      height: 100,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: exercises.length,
+                        itemBuilder: (ctx, i) {
+                          final ex = exercises[i];
+                          return Container(
+                            margin: const EdgeInsets.only(right: 12),
+                            child: _safeImage(ex['imageUrl']),
+                          );
+                        },
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -218,9 +260,16 @@ class _WorkoutCardState extends State<WorkoutCard> {
                     Row(
                       children: [
                         CircleAvatar(
-                            radius: 12,
-                            backgroundImage:
-                                NetworkImage(workoutData['coachPhoto'] ?? '')),
+                          radius: 12,
+                          backgroundImage:
+                              NetworkImage(workoutData['coachPhoto'] ?? ''),
+                          onBackgroundImageError: (_, __) => null,
+                          child: workoutData['coachPhoto'] == null ||
+                                  workoutData['coachPhoto'].toString().isEmpty
+                              ? const Icon(Icons.person,
+                                  size: 16, color: Colors.white54)
+                              : null,
+                        ),
                         const SizedBox(width: 8),
                         Text(workoutData['coach'] ?? 'No Coach',
                             style: const TextStyle(color: Colors.orange)),
@@ -229,46 +278,42 @@ class _WorkoutCardState extends State<WorkoutCard> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Buttons with separators
+                    // Botones (sin cambios)
                     Container(
                       padding: const EdgeInsets.symmetric(
                           vertical: 8, horizontal: 10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2A2A2A),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                          color: const Color(0xFF2A2A2A),
+                          borderRadius: BorderRadius.circular(16)),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _navBtn(Icons.refresh, "Regenerate",
                               () => _regenerateToday(workoutData['id'])),
                           const VerticalDivider(
-                            color: Colors.grey,
-                            thickness: 1,
-                            indent: 10,
-                            endIndent: 10,
-                          ),
+                              color: Colors.grey,
+                              thickness: 1,
+                              indent: 10,
+                              endIndent: 10),
                           _navBtn(
                               Icons.skip_next,
                               _isTomorrow ? "Previous" : "Next",
                               () => _toggleDay()),
                           const VerticalDivider(
-                            color: Colors.grey,
-                            thickness: 1,
-                            indent: 10,
-                            endIndent: 10,
-                          ),
+                              color: Colors.grey,
+                              thickness: 1,
+                              indent: 10,
+                              endIndent: 10),
                           _navBtn(
                               Icons.edit_note,
                               "Edit",
                               () => _navigateToWorkoutMain(
                                   workoutData, exercises)),
                           const VerticalDivider(
-                            color: Colors.grey,
-                            thickness: 1,
-                            indent: 10,
-                            endIndent: 10,
-                          ),
+                              color: Colors.grey,
+                              thickness: 1,
+                              indent: 10,
+                              endIndent: 10),
                           _navBtn(
                               Icons.add, "New", () => _createBlankWorkout()),
                         ],
@@ -319,6 +364,9 @@ class _WorkoutCardState extends State<WorkoutCard> {
     return Expanded(
       child: TextButton(
         onPressed: onTap,
+        style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            minimumSize: const Size(50, 44)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -338,9 +386,6 @@ class _WorkoutCardState extends State<WorkoutCard> {
             ),
           ],
         ),
-        style: TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-            minimumSize: const Size(50, 44)),
       ),
     );
   }
@@ -484,7 +529,8 @@ class _WorkoutCardState extends State<WorkoutCard> {
       'date': date,
       'duration': 59,
       'coach': 'Auto Coach',
-      'imageUrl': 'https://i.imgur.com/5K8zK5P.png',
+      'imageUrl':
+          'https://firebasestorage.googleapis.com/v0/b/weightlifting-tracker-a9834.firebasestorage.app/o/app%2Ffailed_image.png?alt=media&token=930cf186-5b49-4edf-bd59-060075ee4efa',
       'exerciseIds': ids,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -588,7 +634,8 @@ class _WorkoutCardState extends State<WorkoutCard> {
         'date': date,
         'duration': 0,
         'coach': 'No Coach',
-        'coachPhoto': '',
+        'coachPhoto':
+            'https://firebasestorage.googleapis.com/v0/b/weightlifting-tracker-a9834.firebasestorage.app/o/app%2Ffailed_image.png?alt=media&token=930cf186-5b49-4edf-bd59-060075ee4efa',
         'exerciseIds': [],
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -598,7 +645,8 @@ class _WorkoutCardState extends State<WorkoutCard> {
         'date': date,
         'duration': 0,
         'coach': 'No Coach',
-        'coachPhoto': '',
+        'coachPhoto':
+            'https://firebasestorage.googleapis.com/v0/b/weightlifting-tracker-a9834.firebasestorage.app/o/app%2Ffailed_image.png?alt=media&token=930cf186-5b49-4edf-bd59-060075ee4efa',
         'exerciseIds': [],
       };
 

@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_app_check/firebase_app_check.dart'; // NOW WORKS
+import 'package:firebase_app_check/firebase_app_check.dart';
 
 import 'screens/splash_screen.dart';
 import 'screens/sign_in_screen.dart';
@@ -25,12 +25,18 @@ import 'screens/edit_custom_exercise.dart';
 import 'screens/exercise_statistics.dart';
 import 'screens/search_exercises.dart';
 import 'screens/exercise_details.dart';
+import 'screens/search_equipments.dart';
+import 'screens/add_custom_exercise.dart';
+import 'screens/add_custom_equipment.dart';
+import 'screens/profile_settings.dart';
+import 'screens/workout_records_calendar.dart';
+import 'screens/workout_done.dart';
+import 'screens/body_measurements.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
-  // FIXED: App Check now works
   await FirebaseAppCheck.instance.activate(
     androidProvider: AndroidProvider.playIntegrity,
     appleProvider: AppleProvider.appAttest,
@@ -61,6 +67,7 @@ class IronCoachApp extends StatelessWidget {
         '/first_inputs': (context) => const FirstUserInputsScreen(),
         '/your_gym': (context) => const YourGymScreen(),
         '/forging_exp': (context) => const ForgingExpScreen(),
+        '/add_custom_equipment': (context) => const AddCustomEquipmentScreen(),
         '/confirm': (context) => ConfirmationCodeScreen(
               email: ModalRoute.of(context)!.settings.arguments as String,
             ),
@@ -80,11 +87,15 @@ class IronCoachApp extends StatelessWidget {
           final args = ModalRoute.of(context)!.settings.arguments as String;
           return AddExercisesScreen(workoutId: args);
         },
+        '/search_equipments': (context) => SearchEquipmentsScreen(),
         '/exercise_details': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
               as Map<String, dynamic>;
           return ExerciseDetailsScreen(exercise: args['exercise']);
         },
+        '/workout_records_calendar': (context) =>
+            const WorkoutRecordsCalendarScreen(),
+        '/profile_settings': (context) => const ProfileSettingsScreen(),
         '/workout_main': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
               as Map<String, dynamic>;
@@ -119,6 +130,7 @@ class IronCoachApp extends StatelessWidget {
             exercise: args['exercise'],
           );
         },
+        '/add_custom_exercise': (context) => const AddCustomExerciseScreen(),
         '/search_exercises': (context) => const SearchExercisesScreen(),
         '/subscriptions': (context) => const Scaffold(
               body: Center(
@@ -128,6 +140,23 @@ class IronCoachApp extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
               ),
+            ),
+        '/workout_done': (context) {
+          final workoutId =
+              ModalRoute.of(context)!.settings.arguments as String;
+          return WorkoutDoneScreen(workoutId: workoutId);
+        },
+
+        // RUTAS NUEVAS (CORREGIDAS)
+        '/body_measurements': (context) => const BodyMeasurementsScreen(),
+        '/strength_score': (context) => Scaffold(
+              backgroundColor: Colors.black,
+              appBar: AppBar(
+                  title: const Text("Strength Score",
+                      style: TextStyle(color: Colors.white))),
+              body: const Center(
+                  child: Text("Strength Score Screen",
+                      style: TextStyle(color: Colors.white, fontSize: 20))),
             ),
       },
     );
@@ -144,9 +173,8 @@ class AuthWrapper extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(color: Colors.orange),
-            ),
+            body:
+                Center(child: CircularProgressIndicator(color: Colors.orange)),
           );
         }
         return snapshot.hasData ? const HomeScreen() : const SignInScreen();
