@@ -140,11 +140,13 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
           final double weight = (s['weight'] as num?)?.toDouble() ?? 0.0;
           final int reps = (s['reps'] as num?)?.toInt() ?? 0;
 
-          if (weight <= 0 || reps <= 0) {
+          // Only skip if no valid reps; allow weight == 0 or null for bodyweight
+          if (reps <= 0) {
             index++;
             continue;
           }
 
+          // Include in volume/calories even for bodyweight (will be 0)
           volume += weight * reps;
           calories += (weight * reps * 0.05).toInt();
 
@@ -417,8 +419,12 @@ class _WorkoutDoneScreenState extends State<WorkoutDoneScreen> {
 
                                   // Sets
                                   ...sets.map((s) {
-                                    final text =
-                                        "${s['reps']} x ${s['weight'].toStringAsFixed(1)} Kg";
+                                    final double weight = s['weight'] as double;
+                                    final int reps = s['reps'] as int;
+                                    final String weightText = weight > 0
+                                        ? '${weight.toStringAsFixed(1)} Kg'
+                                        : 'Bodyweight';
+                                    final text = "$reps x $weightText";
                                     return Padding(
                                       padding: const EdgeInsets.symmetric(
                                           vertical: 2),

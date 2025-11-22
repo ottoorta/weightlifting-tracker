@@ -105,6 +105,12 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
     }, SetOptions(merge: true));
   }
 
+  // Helper: format weight display
+  String _formatWeight(double? weight) {
+    if (weight == null || weight <= 0) return 'Bodyweight';
+    return '${weight.toStringAsFixed(1)} $weightUnit';
+  }
+
   Future<void> _loadData() async {
     if (user == null || widget.exerciseId.isEmpty) {
       if (mounted) setState(() => isLoading = false);
@@ -120,7 +126,7 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
           .doc(user!.uid)
           .get();
       if (userDoc.exists) {
-        weightUnit = userDoc.get('weightUnit') == 'LB' ? 'LB' : 'KG';
+        weightUnit = userDoc.get('weightUnit') == 'LB' ? 'LB' : 'Kg';
       }
 
       // Cargar notas y estados
@@ -186,12 +192,12 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
         int sessionMaxReps = 0;
         List<Map<String, dynamic>> sessionSets = [];
 
-        // ORDENAR SETS POR TIMESTAMP (oldest → newest)
+        // ORDENAR SETS POR TIMESTAMP
         setsDocs.sort((a, b) {
-          final Map<String, dynamic>? dataA = a.data() as Map<String, dynamic>?;
-          final Map<String, dynamic>? dataB = b.data() as Map<String, dynamic>?;
-          final tsA = dataA?['timestamp'] as Timestamp?;
-          final tsB = dataB?['timestamp'] as Timestamp?;
+          final tsA =
+              (a.data() as Map<String, dynamic>?)?['timestamp'] as Timestamp?;
+          final tsB =
+              (b.data() as Map<String, dynamic>?)?['timestamp'] as Timestamp?;
           if (tsA == null && tsB == null) return 0;
           if (tsA == null) return 1;
           if (tsB == null) return -1;
@@ -200,38 +206,49 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
 
         for (var setDoc in setsDocs) {
           final data = setDoc.data() as Map<String, dynamic>;
-          final double reps = (data['reps'] as num?)?.toDouble() ?? 0.0;
+          final double repsRaw = (data['reps'] as num?)?.toDouble() ?? 0.0;
+          final int reps = repsRaw.toInt();
           final double weight = (data['weight'] as num?)?.toDouble() ?? 0.0;
 
-          if (reps <= 0 || weight <= 0) continue;
+          // Only skip if reps are invalid — allow weight = 0 or null
+          if (reps <= 0) continue;
 
-          final double calc1RM = weight * (1 + reps / 30.0);
+          final bool isBodyweight = weight <= 0;
 
-          sessionVolume += reps * weight;
-          totalVolume += reps * weight;
-          totalReps += reps.toInt();
-
-          if (calc1RM > sessionMax1RM) sessionMax1RM = calc1RM;
-          if (weight > sessionMaxWeight) sessionMaxWeight = weight;
-          if (reps.toInt() > sessionMaxReps) sessionMaxReps = reps.toInt();
-
-          if (calc1RM > projected1RM) {
-            projected1RM = calc1RM;
-            projected1RMDate = workoutDate;
+          // Volume: only count if weighted
+          if (!isBodyweight) {
+            sessionVolume += reps * weight;
+            totalVolume += reps * weight;
           }
-          if (weight > maxWeightLifted) {
-            maxWeightLifted = weight;
-            maxWeightDate = workoutDate;
+
+          totalReps += reps;
+
+          double calc1RM = 0.0;
+          if (!isBodyweight && reps > 0) {
+            calc1RM = weight * (1 + reps / 30.0);
+            if (calc1RM > sessionMax1RM) sessionMax1RM = calc1RM;
+            if (calc1RM > projected1RM) {
+              projected1RM = calc1RM;
+              projected1RMDate = workoutDate;
+            }
+            if (weight > sessionMaxWeight) sessionMaxWeight = weight;
+            if (weight > maxWeightLifted) {
+              maxWeightLifted = weight;
+              maxWeightDate = workoutDate;
+            }
           }
-          if (reps.toInt() > maxRepsSingleSet) {
-            maxRepsSingleSet = reps.toInt();
+
+          if (reps > sessionMaxReps) sessionMaxReps = reps;
+          if (reps > maxRepsSingleSet) {
+            maxRepsSingleSet = reps;
             maxRepsDate = workoutDate;
           }
 
           sessionSets.add({
-            'reps': reps.toInt(),
+            'reps': reps,
             'weight': weight,
-            'calc1RM': calc1RM,
+            'calc1RM': isBodyweight ? null : calc1RM,
+            'isBodyweight': isBodyweight,
           });
         }
 
@@ -240,15 +257,19 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
           maxVolumeSessionDate = workoutDate;
         }
 
-        // Marcar récords del workout
+        // Mark best sets in session
         for (var s in sessionSets) {
-          final double s1RM = s['calc1RM'] as double;
+          final double? s1RM = s['calc1RM'] as double?;
           final double sWeight = s['weight'] as double;
-          if (s1RM >= sessionMax1RM - 0.01) {
-            s['isSessionMax1RM'] = true;
-          }
-          if (sWeight >= sessionMaxWeight - 0.01) {
-            s['isSessionMaxWeight'] = true;
+          final bool isBodyweight = s['isBodyweight'] as bool;
+
+          if (!isBodyweight) {
+            if (s1RM != null && s1RM >= sessionMax1RM - 0.01) {
+              s['isSessionMax1RM'] = true;
+            }
+            if (sWeight >= sessionMaxWeight - 0.01) {
+              s['isSessionMaxWeight'] = true;
+            }
           }
         }
 
@@ -258,13 +279,13 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
           'volume': sessionVolume.round(),
           'sessionMax1RM': sessionMax1RM,
           'sessionMaxWeight': sessionMaxWeight,
+          'sessionMaxReps': sessionMaxReps,
           'sets': sessionSets,
         });
       }
 
-      // ORDENAR HISTORIAL: más nuevo → más antiguo
+      // Sort: newest first
       allSessions.sort((a, b) => b['date'].compareTo(a['date']));
-
       history = allSessions;
     } catch (e) {
       print('Error loading stats: $e');
@@ -366,25 +387,33 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                         : 'Never'),
                 _buildStatRow(
                     'Projected 1 Rep Max (1RM)',
-                    '${projected1RM.toStringAsFixed(1)} $weightUnit',
+                    projected1RM > 0
+                        ? '${projected1RM.toStringAsFixed(1)} $weightUnit'
+                        : 'N/A (Bodyweight)',
                     projected1RMDate != null
                         ? _formatDate(projected1RMDate!)
                         : 'N/A',
                     is1RM: true),
                 _buildStatRow(
                     'Max Weight Lifted',
-                    '${maxWeightLifted.toStringAsFixed(1)} $weightUnit',
+                    maxWeightLifted > 0
+                        ? '${maxWeightLifted.toStringAsFixed(1)} $weightUnit'
+                        : 'Bodyweight Only',
                     maxWeightDate != null ? _formatDate(maxWeightDate!) : 'N/A',
                     isMaxWeight: true),
                 _buildStatRow(
                     'Max Volume in a session',
-                    '${volumeFormat.format(maxVolumeSession.round())} $weightUnit',
+                    maxVolumeSession > 0
+                        ? '${volumeFormat.format(maxVolumeSession.round())} $weightUnit'
+                        : 'Bodyweight',
                     maxVolumeSessionDate != null
                         ? _formatDate(maxVolumeSessionDate!)
                         : 'N/A'),
                 _buildStatRow(
                     'Total Volume all time',
-                    '${volumeFormat.format(totalVolume.round())} $weightUnit',
+                    totalVolume > 0
+                        ? '${volumeFormat.format(totalVolume.round())} $weightUnit'
+                        : 'Bodyweight Only',
                     firstWorkoutDate != null
                         ? 'since ${_formatFullDate(firstWorkoutDate!)}'
                         : ''),
@@ -395,7 +424,7 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                         ? _formatDate(lastWorkoutDate!)
                         : 'N/A'),
                 _buildStatRow(
-                    'Max Repetitions in a session',
+                    'Max Repetitions in a set',
                     maxRepsSingleSet.toString(),
                     maxRepsDate != null ? _formatDate(maxRepsDate!) : 'N/A'),
                 const SizedBox(height: 32),
@@ -435,6 +464,7 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                               TextStyle(color: Colors.white38, fontSize: 16))),
                 ...history.map((h) {
                   final workoutId = h['workoutId'] as String;
+                  final sets = h['sets'] as List<Map<String, dynamic>>;
                   return GestureDetector(
                     onTap: () {
                       Navigator.pushNamed(
@@ -459,25 +489,28 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16)),
                             const SizedBox(height: 12),
-                            Text(
-                                'Volume: ${volumeFormat.format(h['volume'])} $weightUnit',
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 15)),
-                            Text(
-                                'One Rep Max (1RM): ${(h['sessionMax1RM'] as double).toStringAsFixed(1)} $weightUnit',
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 15)),
+                            if (h['volume'] > 0)
+                              Text(
+                                  'Volume: ${volumeFormat.format(h['volume'])} $weightUnit',
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 15)),
+                            if (h['sessionMax1RM'] as double > 0)
+                              Text(
+                                  'One Rep Max: ${(h['sessionMax1RM'] as double).toStringAsFixed(1)} $weightUnit',
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 15)),
                             const SizedBox(height: 12),
-                            ...(h['sets'] as List).map((set) {
-                              final index =
-                                  (h['sets'] as List).indexOf(set) + 1;
+                            ...sets.map((set) {
+                              final index = sets.indexOf(set) + 1;
+                              final weightText =
+                                  _formatWeight(set['weight'] as double?);
                               return Padding(
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 4),
                                 child: Row(
                                   children: [
                                     Text(
-                                        'Set $index: ${set['reps']} Reps – ${(set['weight'] as double).toStringAsFixed(1)} $weightUnit',
+                                        'Set $index: ${set['reps']} x $weightText',
                                         style: const TextStyle(
                                             color: Colors.white)),
                                     if (set['isSessionMax1RM'] == true)

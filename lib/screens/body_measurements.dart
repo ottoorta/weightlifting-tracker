@@ -101,12 +101,26 @@ class _BodyMeasurementsScreenState extends State<BodyMeasurementsScreen> {
             child: Column(
               children: [
                 // Profile Photo
-                CircleAvatar(
-                  radius: 60,
-                  backgroundImage: photoUrl != null && photoUrl!.isNotEmpty
-                      ? NetworkImage(photoUrl!)
-                      : const AssetImage("assets/default_avatar.png")
-                          as ImageProvider,
+                Container(
+                  width: 150,
+                  height: 200,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    image: DecorationImage(
+                      image: photoUrl != null && photoUrl!.isNotEmpty
+                          ? NetworkImage(photoUrl!) as ImageProvider
+                          : const AssetImage("assets/no_image.png")
+                              as ImageProvider,
+                      fit: BoxFit.cover,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.orange.withOpacity(0.4),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 24),
 

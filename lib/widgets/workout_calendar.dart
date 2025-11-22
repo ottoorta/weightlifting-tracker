@@ -120,7 +120,7 @@ class _WorkoutCalendarState extends State<WorkoutCalendar> {
           ],
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          //crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text("Workout Calendar",
                 style: TextStyle(
