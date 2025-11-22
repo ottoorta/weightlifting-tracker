@@ -137,11 +137,10 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
         _notesController.text = notes;
       }
 
-      // === BUSCAR logged_sets ===
+      // === BUSCAR TODOS LOS logged_sets del ejercicio ===
       final setsSnap = await FirebaseFirestore.instance
           .collectionGroup('logged_sets')
           .where('exerciseId', isEqualTo: widget.exerciseId)
-          .orderBy('timestamp', descending: true)
           .get();
 
       if (setsSnap.docs.isEmpty) {
@@ -149,15 +148,18 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
         return;
       }
 
+      // Agrupar sets por workout
       Map<String, List<QueryDocumentSnapshot>> setsByWorkout = {};
       for (var doc in setsSnap.docs) {
         final workoutId = doc.reference.parent.parent!.id;
         setsByWorkout.putIfAbsent(workoutId, () => []).add(doc);
       }
 
+      List<Map<String, dynamic>> allSessions = [];
+
       for (var entry in setsByWorkout.entries) {
         final workoutId = entry.key;
-        final setsDocs = entry.value;
+        var setsDocs = entry.value;
 
         final workoutDoc = await FirebaseFirestore.instance
             .collection('workouts')
@@ -183,6 +185,18 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
         double sessionMaxWeight = 0.0;
         int sessionMaxReps = 0;
         List<Map<String, dynamic>> sessionSets = [];
+
+        // ORDENAR SETS POR TIMESTAMP (oldest → newest)
+        setsDocs.sort((a, b) {
+          final Map<String, dynamic>? dataA = a.data() as Map<String, dynamic>?;
+          final Map<String, dynamic>? dataB = b.data() as Map<String, dynamic>?;
+          final tsA = dataA?['timestamp'] as Timestamp?;
+          final tsB = dataB?['timestamp'] as Timestamp?;
+          if (tsA == null && tsB == null) return 0;
+          if (tsA == null) return 1;
+          if (tsB == null) return -1;
+          return tsA.compareTo(tsB);
+        });
 
         for (var setDoc in setsDocs) {
           final data = setDoc.data() as Map<String, dynamic>;
@@ -214,8 +228,11 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
             maxRepsDate = workoutDate;
           }
 
-          sessionSets.add(
-              {'reps': reps.toInt(), 'weight': weight, 'calc1RM': calc1RM});
+          sessionSets.add({
+            'reps': reps.toInt(),
+            'weight': weight,
+            'calc1RM': calc1RM,
+          });
         }
 
         if (sessionVolume > maxVolumeSession) {
@@ -223,17 +240,20 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
           maxVolumeSessionDate = workoutDate;
         }
 
+        // Marcar récords del workout
         for (var s in sessionSets) {
           final double s1RM = s['calc1RM'] as double;
           final double sWeight = s['weight'] as double;
           if (s1RM >= sessionMax1RM - 0.01) {
             s['isSessionMax1RM'] = true;
-          } else if (sWeight >= sessionMaxWeight - 0.01) {
+          }
+          if (sWeight >= sessionMaxWeight - 0.01) {
             s['isSessionMaxWeight'] = true;
           }
         }
 
-        history.add({
+        allSessions.add({
+          'workoutId': workoutId,
           'date': workoutDate,
           'volume': sessionVolume.round(),
           'sessionMax1RM': sessionMax1RM,
@@ -241,6 +261,11 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
           'sets': sessionSets,
         });
       }
+
+      // ORDENAR HISTORIAL: más nuevo → más antiguo
+      allSessions.sort((a, b) => b['date'].compareTo(a['date']));
+
+      history = allSessions;
     } catch (e) {
       print('Error loading stats: $e');
     } finally {
@@ -333,8 +358,6 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                   ],
                 ),
                 const SizedBox(height: 32),
-
-                // === ESTADÍSTICAS CON ÍCONOS Y FECHA A LA DERECHA ===
                 _buildStatRow(
                     'Workouts Performed',
                     workoutsPerformed.toString(),
@@ -375,7 +398,6 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                     'Max Repetitions in a session',
                     maxRepsSingleSet.toString(),
                     maxRepsDate != null ? _formatDate(maxRepsDate!) : 'N/A'),
-
                 const SizedBox(height: 32),
                 const Text('Notes',
                     style: TextStyle(
@@ -400,7 +422,6 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                   maxLines: 4,
                 ),
                 const SizedBox(height: 32),
-
                 const Text('History',
                     style: TextStyle(
                         color: Colors.white,
@@ -412,7 +433,17 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                       child: Text('No history yet',
                           style:
                               TextStyle(color: Colors.white38, fontSize: 16))),
-                ...history.map((h) => Card(
+                ...history.map((h) {
+                  final workoutId = h['workoutId'] as String;
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pushNamed(
+                        context,
+                        '/workout_done',
+                        arguments: workoutId,
+                      );
+                    },
+                    child: Card(
                       color: const Color(0xFF1C1C1E),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
@@ -468,7 +499,9 @@ class _ExerciseStatisticsScreenState extends State<ExerciseStatisticsScreen> {
                           ],
                         ),
                       ),
-                    )),
+                    ),
+                  );
+                }),
                 const SizedBox(height: 80),
               ],
             ),
