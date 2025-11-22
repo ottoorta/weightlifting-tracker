@@ -655,7 +655,7 @@ class _WorkoutRecordsCalendarScreenState
                                     padding:
                                         const EdgeInsets.only(left: 16, top: 4),
                                     child: Text(
-                                      "Sets: ${e['sets']}  •  Vol: ${e['volume'].toStringAsFixed(0)} Kg  •  1RM: ${e['1rm'].toStringAsFixed(1)} Kg  •  Max: ${e['maxWeight'].toStringAsFixed(1)} Kg",
+                                      "Sets: ${e['sets']}  •  Vol: ${e['volume'] > 0 ? '${e['volume'].toStringAsFixed(0)} Kg' : 'Bodyweight'}  •  1RM: ${e['1rm'] > 0 ? '${e['1rm'].toStringAsFixed(1)} Kg' : 'Bodyweight'}  •  Max: ${e['maxWeight'] > 0 ? '${e['maxWeight'].toStringAsFixed(1)} Kg' : 'Bodyweight'}",
                                       style: const TextStyle(
                                           color: Colors.white60, fontSize: 13),
                                     ),
@@ -702,6 +702,7 @@ class _WorkoutRecordsCalendarScreenState
     );
   }
 
+// ← ONLY THIS PART WAS CHANGED in _loadPastWorkoutDetails()
   Future<Map<String, dynamic>> _loadPastWorkoutDetails(
       DocumentSnapshot workout) async {
     final data = workout.data() as Map<String, dynamic>;
@@ -719,39 +720,44 @@ class _WorkoutRecordsCalendarScreenState
     for (var setDoc in loggedSetsSnap.docs) {
       final s = setDoc.data() as Map<String, dynamic>;
       final exerciseId = s['exerciseId'] as String?;
-      final w = (s['weight'] as num?)?.toDouble() ?? 0;
-      final r = (s['reps'] as num?)?.toInt() ?? 0;
+      final double w = (s['weight'] as num?)?.toDouble() ?? 0.0;
+      final int r = (s['reps'] as num?)?.toInt() ?? 0;
 
-      if (exerciseId == null || w <= 0 || r <= 0) continue;
+      // Only skip if no valid exercise or reps
+      if (exerciseId == null || r <= 0) continue;
 
-      totalVolume += w * r;
-
-      if (!exerciseData.containsKey(exerciseId)) {
-        exerciseData[exerciseId] = {
-          'sets': 0,
-          'volume': 0.0,
-          'maxWeight': 0.0,
-          'best1RM': 0.0,
-        };
-      }
+      // Initialize exercise stats if not exists
+      exerciseData.putIfAbsent(
+          exerciseId,
+          () => {
+                'sets': 0,
+                'volume': 0.0,
+                'maxWeight': 0.0,
+                'best1RM': 0.0,
+              });
 
       final stats = exerciseData[exerciseId]!;
       stats['sets'] = (stats['sets'] as int) + 1;
-      stats['volume'] = (stats['volume'] as double) + (w * r);
-      if (w > stats['maxWeight']) stats['maxWeight'] = w;
 
-      final estimated1RM = _estimate1RM(w, r);
-      if (estimated1RM > stats['best1RM']) stats['best1RM'] = estimated1RM;
+      // Only add to volume if weight > 0 (bodyweight = 0)
+      if (w > 0) {
+        totalVolume += w * r;
+        stats['volume'] = (stats['volume'] as double) + (w * r);
+        if (w > stats['maxWeight']) stats['maxWeight'] = w;
+
+        final estimated1RM = _estimate1RM(w, r);
+        if (estimated1RM > stats['best1RM']) stats['best1RM'] = estimated1RM;
+      }
     }
 
-    // Procesar ejercicios en orden original
+    // Process exercises in original order
     for (var id in exerciseIds) {
       final exerciseId = id.toString();
       if (exerciseData.containsKey(exerciseId)) {
         final name = await _getExerciseName(exerciseId);
         final stats = exerciseData[exerciseId]!;
 
-        // Músculo principal
+        // Get primary muscle
         var doc = await FirebaseFirestore.instance
             .collection('exercises')
             .doc(exerciseId)
@@ -782,7 +788,7 @@ class _WorkoutRecordsCalendarScreenState
       }
     }
 
-    // Effort basado en RIR promedio
+    // Effort logic (unchanged)
     String effort = "Medium";
     double totalRir = 0;
     int rirCount = 0;
