@@ -314,7 +314,7 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                         children: [
                           Expanded(
                             child: DropdownButtonFormField<String>(
-                              value: selectedMuscle,
+                              initialValue: selectedMuscle,
                               decoration: InputDecoration(
                                 labelText: "Muscle",
                                 filled: true,
@@ -341,7 +341,7 @@ class _AddExercisesScreenState extends State<AddExercisesScreen> {
                           const SizedBox(width: 16),
                           Expanded(
                             child: DropdownButtonFormField<String>(
-                              value: selectedEquipment,
+                              initialValue: selectedEquipment,
                               decoration: InputDecoration(
                                 labelText: "Equipment",
                                 filled: true,

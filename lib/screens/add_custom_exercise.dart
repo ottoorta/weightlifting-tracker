@@ -150,8 +150,9 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
               ),
               validator: (val) {
                 final p = int.tryParse(val ?? '');
-                if (p == null || p < 1 || p > 99)
+                if (p == null || p < 1 || p > 99) {
                   return 'Enter a value between 1 and 99';
+                }
                 return null;
               },
               onSaved: (val) => input = val!,
@@ -346,7 +347,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
 
                     // Type
                     DropdownButtonFormField<String>(
-                      value: type,
+                      initialValue: type,
                       decoration: InputDecoration(
                         labelText: "Type",
                         filled: true,
@@ -373,7 +374,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
 
                     // Primary Muscle — NEW: onChanged with popup
                     DropdownButtonFormField<String>(
-                      value: primaryMuscle,
+                      initialValue: primaryMuscle,
                       decoration: InputDecoration(
                         labelText: "Primary Muscle",
                         filled: true,
@@ -405,7 +406,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
 
                     // Secondary Muscle — NEW: onChanged with auto-calc
                     DropdownButtonFormField<String>(
-                      value: secondaryMuscle,
+                      initialValue: secondaryMuscle,
                       hint: const Text("Secondary Muscle",
                           style: TextStyle(color: Colors.white70)),
                       decoration: InputDecoration(
@@ -452,7 +453,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
 
                     // Equipment — UPDATED: onChanged sets name and ID
                     DropdownButtonFormField<String>(
-                      value: selectedEquipmentName,
+                      initialValue: selectedEquipmentName,
                       hint: const Text("Equipment",
                           style: TextStyle(color: Colors.white70)),
                       decoration: InputDecoration(
@@ -478,7 +479,7 @@ class _AddCustomExerciseScreenState extends State<AddCustomExerciseScreen> {
 
                     // Importance
                     DropdownButtonFormField<String>(
-                      value: importance,
+                      initialValue: importance,
                       decoration: InputDecoration(
                         labelText: "Importance",
                         filled: true,

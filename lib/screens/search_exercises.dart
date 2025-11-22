@@ -27,10 +27,11 @@ class _SearchExercisesScreenState extends State<SearchExercisesScreen> {
 
   bool _isLoading = true;
 
+  // ← AÑADE ESTO
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadData(); // ← Esta línea es la que faltaba → carga todo al abrir
   }
 
   Future<void> _loadData() async {
@@ -355,8 +356,12 @@ class _SearchExercisesScreenState extends State<SearchExercisesScreen> {
                 ),
                 const SizedBox(height: 5),
                 GestureDetector(
-                  onTap: () {
-                    Navigator.pushNamed(context, '/add_custom_exercise');
+                  onTap: () async {
+                    final result = await Navigator.pushNamed(
+                        context, '/add_custom_exercise');
+                    if (result == true) {
+                      _loadData(); // Refresca la lista al volver
+                    }
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -392,81 +397,119 @@ class _SearchExercisesScreenState extends State<SearchExercisesScreen> {
                             final equipmentText =
                                 ex['_equipmentText'] ?? 'None';
 
-                            return GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        ExerciseDetailsScreen(exercise: ex),
+                            // Clave única para exercises_notes: userId_exerciseId
+                            final noteId = '${user?.uid}_${ex['id']}';
+
+                            return StreamBuilder<DocumentSnapshot>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('exercises_notes')
+                                  .doc(noteId)
+                                  .snapshots(),
+                              builder: (context, snapshot) {
+                                final bool isFavorite = snapshot.hasData &&
+                                    snapshot.data!.exists &&
+                                    (snapshot.data!['favorite'] as bool? ??
+                                        false);
+
+                                return GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            ExerciseDetailsScreen(exercise: ex),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 8),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1C1C1E),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: isCustom
+                                          ? Border.all(
+                                              color: Colors.orange, width: 1)
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          child: Image.network(
+                                            ex['imageUrl'] ?? '',
+                                            width: 60,
+                                            height: 60,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                Container(
+                                              width: 60,
+                                              height: 60,
+                                              color: Colors.grey[800],
+                                              child: const Icon(
+                                                  Icons.fitness_center,
+                                                  color: Colors.white54),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      ex['name'] ?? 'Unknown',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 16,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  if (isCustom) ...[
+                                                    const SizedBox(width: 8),
+                                                    const Icon(Icons.star,
+                                                        color: Colors.orange,
+                                                        size: 18),
+                                                  ],
+                                                  if (isFavorite) ...[
+                                                    const SizedBox(width: 8),
+                                                    const Icon(Icons.favorite,
+                                                        color: Colors.red,
+                                                        size: 18),
+                                                  ],
+                                                ],
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                "Muscles: ${(ex['muscles'] as List?)?.join(', ') ?? 'None'}",
+                                                style: const TextStyle(
+                                                    color: Colors.white60,
+                                                    fontSize: 12),
+                                              ),
+                                              Text(
+                                                "Equipment: $equipmentText",
+                                                style: const TextStyle(
+                                                    color: Colors.white60,
+                                                    fontSize: 12),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const Icon(Icons.settings,
+                                            color: Colors.orange, size: 24),
+                                      ],
+                                    ),
                                   ),
                                 );
                               },
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 8),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1C1C1E),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: isCustom
-                                      ? Border.all(
-                                          color: Colors.orange, width: 1)
-                                      : null,
-                                ),
-                                child: Row(
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Image.network(
-                                        ex['imageUrl'] ?? '',
-                                        width: 60,
-                                        height: 60,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          width: 60,
-                                          height: 60,
-                                          color: Colors.grey[800],
-                                          child: const Icon(
-                                              Icons.fitness_center,
-                                              color: Colors.white54),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            ex['name'] ?? 'Unknown',
-                                            style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            "Muscles: ${(ex['muscles'] as List?)?.join(', ') ?? 'None'}",
-                                            style: const TextStyle(
-                                                color: Colors.white60,
-                                                fontSize: 12),
-                                          ),
-                                          Text(
-                                            "Equipment: $equipmentText",
-                                            style: const TextStyle(
-                                                color: Colors.white60,
-                                                fontSize: 12),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const Icon(Icons.settings,
-                                        color: Colors.orange, size: 24),
-                                  ],
-                                ),
-                              ),
                             );
                           },
                         ),
